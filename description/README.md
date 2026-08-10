@@ -59,6 +59,10 @@ description/
 
 架构文档不重复具体组件参数或单个接口字段。
 
+当前已建立：
+
+- [`architecture/page-zoom-guard.md`](architecture/page-zoom-guard.md)：管理端页面缩放限制及浏览器边界。
+
 ### 功能文档
 
 **位置：** `features/<业务模块>.md`
@@ -71,8 +75,9 @@ description/
 | --- | --- | --- |
 | `features/season-management.md` | 赛季列表、新增、编辑和状态管理 | `待创建` |
 | `features/challenge-management.md` | 项目、挑战等级、规则和上传配置 | `待创建` |
-| `features/proof-review.md` | 运动凭证查询、查看和终审 | `待创建` |
-| `features/mall-management.md` | 商品、兑换记录和奖品发放管理 | `待创建` |
+| [`features/proof-review.md`](features/proof-review.md) | 运动凭证查询、逐条查看和终审 | `原型版` |
+| [`features/mall-management.md`](features/mall-management.md) | 商品、兑换记录和奖品发放管理 | `原型版` |
+| [`features/user-suggestion-management.md`](features/user-suggestion-management.md) | 新用户意见查看与后续处理边界 | `原型版` |
 
 ### 组件文档
 
@@ -81,6 +86,20 @@ description/
 回答“组件负责什么、如何使用、对外提供哪些能力”。组件文档跟随实际组件创建，记录 `props`、事件、插槽、暴露方法、主要状态和依赖。
 
 > 只为具有业务职责、跨页面复用或对外契约较复杂的组件建立独立文档。简单页面内部展示组件可以在对应功能文档中统一说明。
+
+当前已建立：
+
+- [`components/auth/AccessKeyLoginCard.md`](components/auth/AccessKeyLoginCard.md)：管理端单密钥登录卡片。
+- [`components/dashboard/ChallengeLevelEnrollmentCard.md`](components/dashboard/ChallengeLevelEnrollmentCard.md)：可翻转的挑战等级报名与人员名单卡片。
+- [`components/dashboard/ChallengeLevelPieChart.md`](components/dashboard/ChallengeLevelPieChart.md)：挑战等级报名人数饼状图。
+- [`components/dashboard/EnrollmentFlipCard.md`](components/dashboard/EnrollmentFlipCard.md)：等级与项目报名卡片共用的翻转及人员名单容器。
+- [`components/dashboard/ProjectEnrollmentCard.md`](components/dashboard/ProjectEnrollmentCard.md)：可翻转的项目报名与人员名单卡片。
+- [`components/dashboard/ProjectEnrollmentBarChart.md`](components/dashboard/ProjectEnrollmentBarChart.md)：运动项目报名人数横向柱状图。
+- [`components/dashboard/SeasonProofReviewDeck.md`](components/dashboard/SeasonProofReviewDeck.md)：当前赛季卡片背面的逐条运动凭证终审卡组。
+- [`components/dashboard/SeasonTaskListPanel.md`](components/dashboard/SeasonTaskListPanel.md)：当前赛季卡片背面的通用待办列表。
+- [`components/layout/MainWorkspaceShell.md`](components/layout/MainWorkspaceShell.md)：登录后的悬浮式管理工作台外壳。
+- [`components/visual/FlowingGradientBackground.md`](components/visual/FlowingGradientBackground.md)：全屏 WebGL 流动渐变背景组件。
+- [`components/visual/FloatingSportIcons.md`](components/visual/FloatingSportIcons.md)：运动图标偶发漂移与鼠标排斥组件。
 
 ### API 文档
 
