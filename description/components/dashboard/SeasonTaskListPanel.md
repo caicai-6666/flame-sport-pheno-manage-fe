@@ -28,7 +28,8 @@
   summary="7 项待处理"
   tone="orange"
   :items="rewardItems"
-  action-label="已发放"
+  action-label="发放"
+  :show-item-status="false"
   @close="returnToSeasonOverview"
   @item-action="handleRewardDelivered"
 />
@@ -43,8 +44,9 @@
 | `tone` | `String` | 否 | 强调色，可选 `violet`、`orange`、`mint` |
 | `items` | `Array` | 是 | 按展示顺序排列的待办数组 |
 | `actionLabel` | `String` | 否 | 条目右侧操作按钮文案；为空时不展示按钮 |
+| `showItemStatus` | `Boolean` | 否 | 是否展示条目状态，默认为 `true`；奖品发放列表将其关闭以减少重复信息 |
 
-每个列表项当前使用 `id`、`marker`、`title`、`description`、`meta` 和 `status` 字段。这些字段属于组件展示模型，不代表后端接口契约。
+每个列表项当前使用 `id`、`marker`、`title`、`description`、`meta` 和可选的 `status` 字段。这些字段属于组件展示模型，不代表后端接口契约。
 
 ## 事件
 

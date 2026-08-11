@@ -217,6 +217,7 @@ const selectedMembers = computed(() => props.membersByItem[props.selectedName] ?
   margin: 18px -5px 0 0;
   padding: 0 5px 0 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   gap: 7px;
   list-style: none;
   scrollbar-color: rgb(99 111 104 / 22%) transparent;

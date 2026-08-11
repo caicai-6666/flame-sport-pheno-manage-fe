@@ -21,6 +21,10 @@ defineProps({
     type: String,
     default: '',
   },
+  showItemStatus: {
+    type: Boolean,
+    default: true,
+  },
 })
 
 const emit = defineEmits(['close', 'item-action'])
@@ -72,19 +76,16 @@ const emit = defineEmits(['close', 'item-action'])
 
         <div class="season-task-panel__meta">
           <time>{{ item.meta }}</time>
-          <span>{{ item.status }}</span>
+          <span v-if="showItemStatus && item.status">{{ item.status }}</span>
         </div>
 
         <button
           v-if="actionLabel"
           type="button"
           class="season-task-panel__action"
-          :aria-label="`${item.title}标记为${actionLabel}`"
+          :aria-label="`${actionLabel}${item.title}`"
           @click="emit('item-action', item)"
         >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <path d="m6 12 4 4 8-9" />
-          </svg>
           <span>{{ actionLabel }}</span>
         </button>
 
@@ -226,6 +227,7 @@ const emit = defineEmits(['close', 'item-action'])
   padding: 4px 7px 8px 2px;
   overflow-x: hidden;
   overflow-y: auto;
+  overscroll-behavior: contain;
   gap: 10px;
   scrollbar-color: var(--task-border) transparent;
   scrollbar-width: thin;
@@ -325,7 +327,6 @@ const emit = defineEmits(['close', 'item-action'])
   padding: 0 11px;
   align-items: center;
   justify-content: center;
-  gap: 5px;
   color: #fff9f4;
   font: inherit;
   font-size: 9px;
@@ -343,17 +344,6 @@ const emit = defineEmits(['close', 'item-action'])
   transition:
     box-shadow 360ms cubic-bezier(0.16, 1, 0.3, 1),
     transform 360ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.season-task-panel__action svg {
-  width: 13px;
-  height: 13px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 2;
-  transition: transform 360ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .season-task-panel__action:focus-visible {
@@ -457,10 +447,6 @@ const emit = defineEmits(['close', 'item-action'])
     transform: translateY(-2px) scale(1.025);
   }
 
-  .season-task-panel__action:hover svg {
-    transform: scale(1.12) rotate(-5deg);
-  }
-
   .season-task-panel__action:active {
     box-shadow:
       inset 0 2px 4px rgb(112 55 24 / 20%),
@@ -494,7 +480,6 @@ const emit = defineEmits(['close', 'item-action'])
   .season-task-panel__back svg,
   .season-task-panel__item,
   .season-task-panel__action,
-  .season-task-panel__action svg,
   .season-task-item-leave-active,
   .season-task-item-move {
     transition: none;
@@ -503,8 +488,7 @@ const emit = defineEmits(['close', 'item-action'])
   .season-task-panel__back:hover,
   .season-task-panel__back:hover svg,
   .season-task-panel__item:hover,
-  .season-task-panel__action:hover,
-  .season-task-panel__action:hover svg {
+  .season-task-panel__action:hover {
     transform: none;
   }
 }

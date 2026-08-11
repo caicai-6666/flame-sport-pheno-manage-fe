@@ -11,11 +11,13 @@ const props = defineProps({
 const emit = defineEmits(['close', 'reviewed'])
 
 const decision = ref('')
+const selectedRecordId = ref('')
 const reviewComments = ref({})
 const reviewValidationMessage = ref('')
 const reviewCommentInputRef = ref(null)
-const currentRecord = computed(() => props.records[0])
-const nextRecord = computed(() => props.records[1])
+const currentRecord = computed(
+  () => props.records.find((record) => record.id === selectedRecordId.value) ?? null,
+)
 const remainingCount = computed(() => props.records.length)
 const isDeciding = computed(() => Boolean(decision.value))
 const currentReviewComment = computed({
@@ -31,6 +33,26 @@ const currentReviewComment = computed({
 })
 
 let decisionTimerId = 0
+
+function openRecord(record) {
+  if (isDeciding.value) return
+
+  selectedRecordId.value = record.id
+  reviewValidationMessage.value = ''
+}
+
+function handleBack() {
+  if (isDeciding.value) return
+
+  if (currentRecord.value) {
+    // 单条记录页返回待审列表，只有位于列表或完成态时才退出整个终审工作区。
+    selectedRecordId.value = ''
+    reviewValidationMessage.value = ''
+    return
+  }
+
+  emit('close')
+}
 
 async function submitDecision(nextDecision) {
   if (!currentRecord.value || isDeciding.value) return
@@ -54,6 +76,7 @@ async function submitDecision(nextDecision) {
       reviewStatus: nextDecision,
       reviewComment,
     })
+    selectedRecordId.value = ''
     decision.value = ''
     reviewValidationMessage.value = ''
   }, delay)
@@ -84,8 +107,8 @@ onBeforeUnmount(() => {
         type="button"
         class="season-proof-review__back"
         :disabled="isDeciding"
-        aria-label="返回当前赛季信息"
-        @click="emit('close')"
+        :aria-label="currentRecord ? '返回待审记录列表' : '返回当前赛季信息'"
+        @click="handleBack"
       >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="m12 7-5 5 5 5M7 12h10" />
@@ -94,28 +117,76 @@ onBeforeUnmount(() => {
       </button>
 
       <div class="season-proof-review__title">
-        <h2>运动记录终审</h2>
-        <span>{{ remainingCount }} 条待审</span>
+        <h2>{{ currentRecord ? '运动记录终审' : '待审记录' }}</h2>
+        <span>
+          {{ currentRecord
+            ? `${currentRecord.userName} · ${currentRecord.projectName}`
+            : `${remainingCount} 条待审` }}
+        </span>
       </div>
 
-      <span class="season-proof-review__status"><i></i> 初审通过</span>
+      <span class="season-proof-review__status">
+        <i></i> {{ currentRecord ? '初审通过' : '等待终审' }}
+      </span>
     </header>
 
-    <div v-if="currentRecord" class="season-proof-review__deck">
-      <article v-if="nextRecord" class="proof-review-card proof-review-card--next" aria-hidden="true">
-        <div
-          class="proof-review-card__preview"
-          :class="[
-            `is-${nextRecord.tone}`,
-            { 'proof-review-card__preview--placeholder': nextRecord.isImagePlaceholder },
-          ]"
-        >
-          <div class="proof-review-card__image-scroll">
-            <img :src="nextRecord.imageUrl" alt="" draggable="false" />
-          </div>
+    <Transition name="proof-review-view" mode="out-in">
+    <div
+      v-if="!currentRecord && props.records.length"
+      key="record-list"
+      class="season-proof-review__list-view"
+    >
+      <div class="season-proof-review__list-intro">
+        <div>
+          <strong>选择一条记录开始终审</strong>
+          <span>按上传日期排列，点击后查看完整凭证与初审意见</span>
         </div>
-      </article>
+        <small>{{ remainingCount }} 条</small>
+      </div>
 
+      <ul class="season-proof-review__list">
+        <li v-for="record in props.records" :key="record.id">
+          <button
+            type="button"
+            class="proof-review-list-item"
+            :class="`is-${record.tone}`"
+            :aria-label="`审核${record.userName}的${record.projectName}记录，${record.proofDate}`"
+            @click="openRecord(record)"
+          >
+            <span class="proof-review-list-item__avatar" aria-hidden="true">
+              {{ record.userName.slice(0, 1) }}
+            </span>
+
+            <span class="proof-review-list-item__identity">
+              <strong>{{ record.userName }}</strong>
+              <small>{{ record.projectName }} · {{ record.proofDateLabel }}</small>
+            </span>
+
+            <span class="proof-review-list-item__rule">
+              <small>{{ record.challengeLevel }}挑战</small>
+              <strong>{{ record.targetRequirement }}</strong>
+            </span>
+
+            <span class="proof-review-list-item__note">
+              {{ record.note || '用户未填写备注' }}
+            </span>
+
+            <span class="proof-review-list-item__action">
+              审核
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m9 6 6 6-6 6" />
+              </svg>
+            </span>
+          </button>
+        </li>
+      </ul>
+    </div>
+
+    <div
+      v-else-if="currentRecord"
+      :key="`record-detail-${currentRecord.id}`"
+      class="season-proof-review__deck"
+    >
       <article
         :key="currentRecord.id"
         class="proof-review-card proof-review-card--current"
@@ -193,15 +264,33 @@ onBeforeUnmount(() => {
         <div class="proof-review-card__body">
           <div class="proof-review-card__review-thread">
             <article class="is-user-note">
-              <span class="proof-review-card__thread-node" aria-hidden="true">用</span>
-              <div>
+              <button
+                type="button"
+                class="proof-review-card__thread-trigger"
+                :aria-label="`查看${currentRecord.userName}的用户备注`"
+                :aria-describedby="`proof-user-note-${currentRecord.id}`"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M6 5h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-5 4v-4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zm2 4h8m-8 4h5" />
+                </svg>
+              </button>
+              <div :id="`proof-user-note-${currentRecord.id}`" class="proof-review-card__thread-bubble" role="tooltip">
                 <span>用户备注</span>
                 <p>{{ currentRecord.note || '用户未填写备注' }}</p>
               </div>
             </article>
             <article class="is-model-comment">
-              <span class="proof-review-card__thread-node" aria-hidden="true">AI</span>
-              <div>
+              <button
+                type="button"
+                class="proof-review-card__thread-trigger"
+                aria-label="查看模型初审评语"
+                :aria-describedby="`proof-model-comment-${currentRecord.id}`"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 3l1.4 4.1L17.5 8.5l-4.1 1.4L12 14l-1.4-4.1-4.1-1.4 4.1-1.4L12 3zm6 10 .8 2.2L21 16l-2.2.8L18 19l-.8-2.2L15 16l2.2-.8L18 13zM7 14l1 2.8 2.8 1L8 18.8 7 22l-1-3.2-2.8-1L6 16.8 7 14z" />
+                </svg>
+              </button>
+              <div :id="`proof-model-comment-${currentRecord.id}`" class="proof-review-card__thread-bubble" role="tooltip">
                 <span>模型初审评语</span>
                 <p>{{ currentRecord.reviewComment || '暂无初审评语' }}</p>
               </div>
@@ -259,15 +348,16 @@ onBeforeUnmount(() => {
       </article>
     </div>
 
-    <div v-else class="season-proof-review__empty" role="status">
+    <div v-else key="record-empty" class="season-proof-review__empty" role="status">
       <span>
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="m6 12 4 4 8-9" />
         </svg>
       </span>
       <strong>今日记录已审核完成</strong>
-      <button type="button" @click="emit('close')">返回赛季信息</button>
+      <button type="button" @click="handleBack">返回赛季信息</button>
     </div>
+    </Transition>
   </section>
 </template>
 
@@ -402,6 +492,235 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 8px rgb(83 189 160 / 50%);
 }
 
+/* 列表和单条审核卡片采用同一组缓动，避免两种信息密度之间直接跳变。 */
+.proof-review-view-enter-active {
+  transition:
+    opacity 320ms ease,
+    transform 440ms cubic-bezier(0.16, 1, 0.3, 1),
+    filter 360ms ease;
+}
+
+.proof-review-view-leave-active {
+  transition:
+    opacity 180ms ease,
+    transform 240ms cubic-bezier(0.4, 0, 1, 1),
+    filter 220ms ease;
+}
+
+.proof-review-view-enter-from {
+  filter: blur(5px);
+  opacity: 0;
+  transform: translateY(14px) scale(0.975);
+}
+
+.proof-review-view-leave-to {
+  filter: blur(3px);
+  opacity: 0;
+  transform: translateY(-7px) scale(0.988);
+}
+
+.season-proof-review__list-view {
+  display: flex;
+  min-height: 0;
+  margin-top: 16px;
+  padding: 14px;
+  flex: 1;
+  background:
+    radial-gradient(circle at 100% 0%, rgb(132 115 225 / 8%), transparent 34%),
+    rgb(255 255 255 / 42%);
+  border: 1px solid rgb(255 255 255 / 72%);
+  border-radius: 24px;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 84%),
+    0 16px 36px rgb(42 57 49 / 8%);
+  flex-direction: column;
+}
+
+.season-proof-review__list-intro {
+  display: flex;
+  padding: 2px 3px 13px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.season-proof-review__list-intro > div {
+  display: grid;
+  gap: 3px;
+}
+
+.season-proof-review__list-intro strong {
+  color: #334139;
+  font-size: 13px;
+}
+
+.season-proof-review__list-intro span {
+  color: #89938e;
+  font-size: 9.5px;
+}
+
+.season-proof-review__list-intro small {
+  padding: 7px 10px;
+  color: #6d60cd;
+  font-size: 9.5px;
+  font-weight: 760;
+  background: rgb(120 103 214 / 9%);
+  border-radius: 999px;
+}
+
+.season-proof-review__list {
+  display: grid;
+  min-height: 0;
+  margin: 0;
+  padding: 2px 5px 4px 1px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  gap: 10px;
+  scrollbar-color: rgb(112 99 216 / 18%) transparent;
+  scrollbar-width: thin;
+}
+
+.season-proof-review__list > li {
+  min-width: 0;
+  list-style: none;
+}
+
+.proof-review-list-item {
+  --record-accent: #796cd8;
+  --record-soft: rgb(121 108 216 / 10%);
+  display: grid;
+  width: 100%;
+  min-height: 78px;
+  padding: 13px 12px;
+  align-items: center;
+  gap: 11px;
+  color: #35443c;
+  font: inherit;
+  text-align: left;
+  background: rgb(255 255 255 / 72%);
+  border: 1px solid rgb(255 255 255 / 88%);
+  border-radius: 19px;
+  box-shadow:
+    inset 0 1px 0 #fff,
+    0 7px 16px rgb(48 65 56 / 6%);
+  cursor: pointer;
+  grid-template-columns: 44px minmax(70px, 0.75fr) minmax(112px, 1.2fr) minmax(86px, 1fr) auto;
+  transition:
+    border-color 320ms ease,
+    box-shadow 420ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 420ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.proof-review-list-item.is-blue {
+  --record-accent: #548fd4;
+  --record-soft: rgb(84 143 212 / 10%);
+}
+
+.proof-review-list-item.is-mint,
+.proof-review-list-item.is-green {
+  --record-accent: #439f84;
+  --record-soft: rgb(67 159 132 / 10%);
+}
+
+.proof-review-list-item.is-orange {
+  --record-accent: #d98452;
+  --record-soft: rgb(217 132 82 / 10%);
+}
+
+.proof-review-list-item__avatar {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  color: var(--record-accent);
+  font-size: 14px;
+  font-weight: 820;
+  background: var(--record-soft);
+  border: 1px solid color-mix(in srgb, var(--record-accent) 15%, transparent);
+  border-radius: 15px;
+  place-items: center;
+}
+
+.proof-review-list-item__identity,
+.proof-review-list-item__rule {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.proof-review-list-item__identity strong,
+.proof-review-list-item__rule strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.proof-review-list-item__identity strong {
+  font-size: 12.5px;
+}
+
+.proof-review-list-item__identity small,
+.proof-review-list-item__rule small {
+  color: #8b9590;
+  font-size: 9.5px;
+}
+
+.proof-review-list-item__rule strong {
+  color: #59675f;
+  font-size: 10px;
+  font-weight: 680;
+}
+
+.proof-review-list-item__note {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  color: #7a8580;
+  font-size: 10px;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.proof-review-list-item__action {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--record-accent);
+  font-size: 10px;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.proof-review-list-item__action svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.9;
+  transition: transform 320ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.proof-review-list-item:focus-visible {
+  outline: 3px solid rgb(112 99 216 / 24%);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) {
+  .proof-review-list-item:hover {
+    border-color: color-mix(in srgb, var(--record-accent) 18%, transparent);
+    box-shadow:
+      inset 0 1px 0 #fff,
+      0 12px 24px rgb(48 65 56 / 10%);
+    transform: translateY(-2px) scale(1.004);
+  }
+
+  .proof-review-list-item:hover .proof-review-list-item__action svg {
+    transform: translateX(3px);
+  }
+}
+
 .season-proof-review__deck {
   position: relative;
   min-height: 0;
@@ -422,29 +741,9 @@ onBeforeUnmount(() => {
   transform-origin: center bottom;
 }
 
-.proof-review-card--next {
-  z-index: 1;
-  opacity: 0.58;
-  transform: translateY(10px) scale(0.955);
-  transition:
-    opacity 420ms ease,
-    transform 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-
-.proof-review-card--next .proof-review-card__preview {
-  height: calc(100% - 190px);
-  flex: 0 0 calc(100% - 190px);
-}
-
 .proof-review-card--current {
   z-index: 2;
-  display: flex;
-  flex-direction: column;
-}
-
-.season-proof-review--deciding .proof-review-card--next {
-  opacity: 0.9;
-  transform: translateY(0) scale(1);
+  display: block;
 }
 
 .proof-review-card--approved {
@@ -458,9 +757,9 @@ onBeforeUnmount(() => {
 .proof-review-card__preview {
   --proof-start: #8375e1;
   --proof-end: #5cbca2;
-  position: relative;
-  min-height: 180px;
-  flex: 1 1 auto;
+  position: absolute;
+  inset: 0;
+  min-height: 0;
   overflow: hidden;
   background:
     radial-gradient(circle at 18% 12%, rgb(255 255 255 / 32%), transparent 34%),
@@ -735,102 +1034,166 @@ onBeforeUnmount(() => {
 }
 
 .proof-review-card__body {
-  min-height: 190px;
-  padding: 9px 11px 10px;
-  flex: 0 0 190px;
-  background:
-    radial-gradient(circle at 100% 100%, rgb(83 189 160 / 7%), transparent 38%),
-    rgb(252 253 252 / 98%);
-  border-top: 1px solid rgb(62 82 71 / 6%);
+  position: absolute;
+  z-index: 3;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  padding: 0 11px 10px;
+  background: transparent;
+  pointer-events: none;
 }
 
-/* 将用户、模型与管理员评语组织成连续对话链，强化审核上下文并节省纵向空间。 */
+/* 两类审核上下文收纳为纵向图标，悬浮或聚焦后再展开完整气泡。 */
 .proof-review-card__review-thread {
   position: relative;
   display: grid;
-  gap: 5px;
-}
-
-.proof-review-card__review-thread::before {
-  position: absolute;
-  top: 29px;
-  bottom: 29px;
-  left: 15px;
-  width: 1px;
-  background: linear-gradient(#8d80e5, #54bda0);
-  content: '';
-  opacity: 0.34;
+  width: 36px;
+  gap: 6px;
 }
 
 .proof-review-card__review-thread article {
+  --review-bubble: rgb(249 251 250 / 88%);
+  --review-bubble-border: rgb(255 255 255 / 68%);
   position: relative;
-  display: grid;
-  min-height: 45px;
-  align-items: center;
-  gap: 8px;
-  grid-template-columns: 30px minmax(0, 1fr);
+  width: 36px;
+  height: 36px;
+  pointer-events: auto;
 }
 
-.proof-review-card__review-thread article > div {
-  min-width: 0;
-  padding: 5px 8px 6px;
-  background: rgb(245 247 245 / 88%);
-  border: 1px solid rgb(61 82 71 / 6%);
-  border-radius: 11px 11px 11px 4px;
+.proof-review-card__review-thread .is-model-comment {
+  --review-bubble: rgb(237 248 244 / 90%);
+  --review-bubble-border: rgb(180 225 211 / 44%);
 }
 
-.proof-review-card__review-thread .is-model-comment > div {
-  background: linear-gradient(115deg, rgb(239 245 255 / 88%), rgb(238 248 244 / 88%));
-  border-color: rgb(112 99 216 / 8%);
-}
-
-.proof-review-card__thread-node {
+.proof-review-card__thread-trigger {
   position: relative;
   z-index: 1;
   display: grid;
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
   color: #fff;
-  font-size: 9px;
-  font-weight: 800;
   background: linear-gradient(145deg, #8a7ee0, #6c60c9);
-  border: 3px solid #fbfcfb;
-  border-radius: 10px;
+  border: 2px solid rgb(255 255 255 / 88%);
+  border-radius: 12px;
   box-shadow: 0 5px 12px rgb(83 70 160 / 16%);
+  cursor: help;
   place-items: center;
+  transition:
+    box-shadow 260ms ease,
+    transform 320ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.is-model-comment .proof-review-card__thread-node {
-  font-size: 7px;
+.proof-review-card__thread-trigger svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+.is-model-comment .proof-review-card__thread-trigger {
   background: linear-gradient(145deg, #60c5a8, #3d937a);
   box-shadow: 0 5px 12px rgb(61 147 122 / 16%);
 }
 
-.proof-review-card__review-thread article > div > span {
+.is-model-comment .proof-review-card__thread-trigger svg {
+  fill: currentColor;
+  stroke: none;
+}
+
+.proof-review-card__thread-trigger:focus-visible {
+  outline: 3px solid rgb(255 255 255 / 74%);
+  outline-offset: 2px;
+}
+
+.proof-review-card__thread-bubble {
+  position: absolute;
+  z-index: 6;
+  bottom: 0;
+  left: 44px;
+  width: min(340px, calc(100vw - 120px));
+  padding: 10px 12px;
+  background: var(--review-bubble);
+  border: 1px solid var(--review-bubble-border);
+  border-radius: 14px 14px 14px 5px;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 66%),
+    0 12px 28px rgb(25 43 34 / 20%);
+  -webkit-backdrop-filter: blur(12px) saturate(118%);
+  backdrop-filter: blur(12px) saturate(118%);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(-6px) scale(0.97);
+  transform-origin: bottom left;
+  visibility: hidden;
+  transition:
+    opacity 180ms ease,
+    transform 300ms cubic-bezier(0.16, 1, 0.3, 1),
+    visibility 180ms ease;
+}
+
+.proof-review-card__thread-bubble::before {
+  position: absolute;
+  bottom: 12px;
+  left: -5px;
+  width: 10px;
+  height: 10px;
+  background: var(--review-bubble);
+  border-bottom: 1px solid var(--review-bubble-border);
+  border-left: 1px solid var(--review-bubble-border);
+  content: '';
+  transform: rotate(45deg);
+}
+
+.proof-review-card__thread-bubble > span {
   display: block;
-  margin-bottom: 1px;
-  color: #7f8a84;
+  margin-bottom: 3px;
+  color: #75827b;
   font-size: 9px;
   font-weight: 750;
 }
 
-.proof-review-card__review-thread p {
-  display: -webkit-box;
+.proof-review-card__thread-bubble p {
   margin: 0;
-  overflow: hidden;
-  color: #3f4e46;
+  color: #35443c;
   font-size: 10.5px;
-  line-height: 1.32;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  line-height: 1.45;
+}
+
+.proof-review-card__review-thread article:hover .proof-review-card__thread-bubble,
+.proof-review-card__review-thread article:focus-within .proof-review-card__thread-bubble {
+  opacity: 1;
+  transform: translateX(0) scale(1);
+  visibility: visible;
+}
+
+@media (hover: hover) {
+  .proof-review-card__thread-trigger:hover {
+    box-shadow: 0 9px 20px rgb(44 67 55 / 22%);
+    transform: translateY(-2px) scale(1.04);
+  }
 }
 
 .proof-review-card__composer {
   display: grid;
-  min-height: 56px;
-  margin-top: 7px;
+  min-height: 70px;
+  margin-top: 8px;
+  padding: 7px;
   gap: 6px;
+  background: rgb(249 252 250 / 90%);
+  border: 1px solid rgb(255 255 255 / 72%);
+  border-radius: 16px;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 78%),
+    0 9px 24px rgb(32 50 40 / 16%);
   grid-template-columns: minmax(0, 1fr) 44px 44px;
+  -webkit-backdrop-filter: blur(14px) saturate(115%);
+  backdrop-filter: blur(14px) saturate(115%);
+  pointer-events: auto;
 }
 
 .proof-review-card__composer-field {
@@ -1010,6 +1373,14 @@ onBeforeUnmount(() => {
   .season-proof-review__head {
     grid-template-columns: auto 1fr;
   }
+
+  .proof-review-list-item {
+    grid-template-columns: 44px minmax(78px, 0.8fr) minmax(110px, 1.2fr) auto;
+  }
+
+  .proof-review-list-item__note {
+    display: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1019,8 +1390,13 @@ onBeforeUnmount(() => {
     opacity: 0;
   }
 
-  .proof-review-card--next,
   .proof-review-card__decision-button,
+  .proof-review-list-item,
+  .proof-review-list-item__action svg,
+  .proof-review-card__thread-trigger,
+  .proof-review-card__thread-bubble,
+  .proof-review-view-enter-active,
+  .proof-review-view-leave-active,
   .proof-review-card__project,
   .proof-review-card__target-tooltip,
   .season-proof-review__back,
@@ -1033,8 +1409,16 @@ onBeforeUnmount(() => {
   .season-proof-review__back:active:not(:disabled),
   .proof-review-card__project:hover,
   .proof-review-card__project:focus-visible,
+  .proof-review-card__thread-trigger:hover,
   .proof-review-card__project:hover + .proof-review-card__target-tooltip,
   .proof-review-card__project:focus-visible + .proof-review-card__target-tooltip {
+    transform: none;
+  }
+
+  .proof-review-view-enter-from,
+  .proof-review-view-leave-to {
+    filter: none;
+    opacity: 1;
     transform: none;
   }
 }

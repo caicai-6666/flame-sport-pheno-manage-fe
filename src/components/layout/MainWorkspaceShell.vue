@@ -7,8 +7,10 @@ import runningProofIcon from '../../assets/icon/跑步.png'
 import climbingProofIcon from '../../assets/icon/自行车赛车.png'
 import brandLogo from '../../assets/logo.png'
 import longProofImage from '../../assets/test/proof-record-long.png'
+import PlatformConfigurationPage from '../configuration/PlatformConfigurationPage.vue'
 import SeasonProofReviewDeck from '../dashboard/SeasonProofReviewDeck.vue'
 import SeasonTaskListPanel from '../dashboard/SeasonTaskListPanel.vue'
+import UserAffairsPage from '../user-affairs/UserAffairsPage.vue'
 
 // ECharts 仅在进入数据看板后加载，避免增加登录首屏的脚本体积。
 const ChallengeLevelEnrollmentCard = defineAsyncComponent(
@@ -28,7 +30,12 @@ const todayLabel = computed(() =>
   }).format(new Date()),
 )
 
-const navigationItems = ['数据看板', '平台配置', '用户事务']
+const navigationItems = [
+  { id: 'dashboard', label: '数据看板', enabled: true },
+  { id: 'configuration', label: '平台配置', enabled: true },
+  { id: 'user-affairs', label: '用户事务', enabled: true },
+]
+const activeWorkspaceIndex = ref(0)
 
 const levelEnrollments = [
   { name: '青铜', value: 486, color: '#8275df' },
@@ -241,6 +248,13 @@ function handleQueueItemClick(item) {
   if (item.action) showSeasonPage(item.action)
 }
 
+function handleNavigationClick(item, index) {
+  if (!item.enabled || activeWorkspaceIndex.value === index) return
+
+  // 三个业务页面保持常驻，只移动页面轨道，确保看板图表与未完成审核状态不会因切页重建。
+  activeWorkspaceIndex.value = index
+}
+
 function showSeasonPage(page) {
   if (isSeasonPageTurning.value || activeSeasonPage.value === page) return
 
@@ -271,7 +285,7 @@ function handleProofReviewed({ recordId }) {
 }
 
 function handleRewardDelivered(item) {
-  // 原型阶段以本地清理模拟“已发放”，真实接入时必须等待服务端确认成功后再移出队列。
+  // 原型阶段以本地清理模拟发放成功，真实接入时必须等待服务端确认后再移出队列。
   rewardDeliveryItems.value = rewardDeliveryItems.value.filter(
     (rewardItem) => rewardItem.id !== item.id,
   )
@@ -290,15 +304,26 @@ function handleRewardDelivered(item) {
         </span>
       </div>
 
-      <nav class="workspace-shell__nav" aria-label="主要模块">
-        <span
+      <nav
+        class="workspace-shell__nav"
+        :style="{
+          '--workspace-nav-offset': `calc(${activeWorkspaceIndex * 100}% + ${activeWorkspaceIndex * 4}px)`,
+        }"
+        aria-label="主要模块"
+      >
+        <span class="workspace-shell__nav-slider" aria-hidden="true"></span>
+        <button
           v-for="(item, index) in navigationItems"
-          :key="item"
+          :key="item.id"
+          type="button"
           class="workspace-shell__nav-item"
-          :class="{ 'workspace-shell__nav-item--active': index === 0 }"
+          :class="{ 'workspace-shell__nav-item--active': index === activeWorkspaceIndex }"
+          :disabled="!item.enabled"
+          :aria-current="index === activeWorkspaceIndex ? 'page' : undefined"
+          @click="handleNavigationClick(item, index)"
         >
-          {{ item }}
-        </span>
+          {{ item.label }}
+        </button>
       </nav>
 
       <div class="workspace-shell__profile">
@@ -311,8 +336,17 @@ function handleRewardDelivered(item) {
       </div>
     </header>
 
-    <main class="workspace-shell__main">
-      <div class="workspace-shell__dashboard-grid">
+    <div class="workspace-shell__viewport">
+      <div
+        class="workspace-shell__page-track"
+        :style="{ transform: `translate3d(-${activeWorkspaceIndex * 100}%, 0, 0)` }"
+      >
+        <main
+          class="workspace-shell__main workspace-shell__page"
+          :aria-hidden="activeWorkspaceIndex !== 0"
+          :inert="activeWorkspaceIndex !== 0"
+        >
+          <div class="workspace-shell__dashboard-grid">
         <section
           class="season-workspace-card"
           aria-label="当前赛季与今日待办工作区"
@@ -392,7 +426,8 @@ function handleRewardDelivered(item) {
                 :summary="`${rewardDeliveryItems.length} 项待处理`"
                 tone="orange"
                 :items="rewardDeliveryItems"
-                action-label="已发放"
+                action-label="发放"
+                :show-item-status="false"
                 @close="returnToSeasonOverview"
                 @item-action="handleRewardDelivered"
               />
@@ -458,8 +493,26 @@ function handleRewardDelivered(item) {
           :items="projectEnrollments"
           :members-by-project="projectEnrollmentMembers"
         />
+          </div>
+        </main>
+
+        <main
+          class="workspace-shell__main workspace-shell__page"
+          :aria-hidden="activeWorkspaceIndex !== 1"
+          :inert="activeWorkspaceIndex !== 1"
+        >
+          <PlatformConfigurationPage :active="activeWorkspaceIndex === 1" />
+        </main>
+
+        <main
+          class="workspace-shell__main workspace-shell__page"
+          :aria-hidden="activeWorkspaceIndex !== 2"
+          :inert="activeWorkspaceIndex !== 2"
+        >
+          <UserAffairsPage :active="activeWorkspaceIndex === 2" />
+        </main>
       </div>
-    </main>
+    </div>
   </section>
 </template>
 
@@ -544,29 +597,66 @@ function handleRewardDelivered(item) {
 }
 
 .workspace-shell__nav {
+  position: relative;
+  display: grid;
+  width: clamp(220px, 28vw, 330px);
   padding: 5px;
   gap: 4px;
   background: rgb(221 226 223 / 68%);
   border: 1px solid rgb(255 255 255 / 68%);
   border-radius: 999px;
   box-shadow: inset 0 1px 3px rgb(61 75 68 / 7%);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  justify-self: center;
+}
+
+.workspace-shell__nav-slider {
+  position: absolute;
+  z-index: 0;
+  top: 5px;
+  bottom: 5px;
+  left: 5px;
+  width: calc((100% - 18px) / 3);
+  background: rgb(255 255 255 / 92%);
+  border: 1px solid rgb(255 255 255 / 82%);
+  border-radius: 999px;
+  box-shadow:
+    0 5px 16px rgb(47 61 54 / 11%),
+    inset 0 1px 0 #fff;
+  pointer-events: none;
+  transform: translate3d(var(--workspace-nav-offset, 0), 0, 0);
+  transition: transform 560ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .workspace-shell__nav-item {
+  position: relative;
+  z-index: 1;
   padding: 10px 18px;
   color: #7c8580;
+  font: inherit;
   font-size: 13px;
   font-weight: 650;
+  appearance: none;
+  background: transparent;
+  border: 0;
   border-radius: 999px;
+  cursor: pointer;
   white-space: nowrap;
+  transition: color 360ms ease;
 }
 
 .workspace-shell__nav-item--active {
   color: #25332b;
-  background: rgb(255 255 255 / 92%);
-  box-shadow:
-    0 5px 16px rgb(47 61 54 / 11%),
-    inset 0 1px 0 #fff;
+}
+
+.workspace-shell__nav-item:disabled {
+  cursor: default;
+  opacity: 0.48;
+}
+
+.workspace-shell__nav-item:focus-visible {
+  outline: 3px solid rgb(112 99 216 / 28%);
+  outline-offset: 2px;
 }
 
 .workspace-shell__profile {
@@ -616,15 +706,37 @@ function handleRewardDelivered(item) {
   stroke-width: 1.7;
 }
 
-.workspace-shell__main {
+.workspace-shell__viewport {
   position: relative;
   z-index: 1;
-  display: flex;
   height: calc(100% - 92px);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workspace-shell__page-track {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  will-change: transform;
+  transition: transform 760ms cubic-bezier(0.2, 0.78, 0.2, 1);
+}
+
+.workspace-shell__main {
+  position: relative;
+  display: flex;
+  height: 100%;
   min-height: 0;
   padding: clamp(26px, 3vw, 46px);
   overflow-y: auto;
+  overscroll-behavior: contain;
   flex-direction: column;
+}
+
+.workspace-shell__page {
+  min-width: 0;
+  flex: 0 0 100%;
 }
 
 .workspace-shell__dashboard-grid {
@@ -1284,11 +1396,7 @@ function handleRewardDelivered(item) {
 
 @media (max-width: 1180px) {
   .workspace-shell__header {
-    grid-template-columns: 1fr auto;
-  }
-
-  .workspace-shell__nav {
-    display: none;
+    grid-template-columns: auto 1fr auto;
   }
 
   .workspace-shell__dashboard-grid {
@@ -1321,6 +1429,10 @@ function handleRewardDelivered(item) {
     display: none;
   }
 
+  .workspace-shell__brand-copy {
+    display: none;
+  }
+
   .workspace-shell__logo-wrap {
     width: 44px;
     height: 44px;
@@ -1331,8 +1443,11 @@ function handleRewardDelivered(item) {
     height: 35px;
   }
 
-  .workspace-shell__main {
+  .workspace-shell__viewport {
     height: calc(100% - 76px);
+  }
+
+  .workspace-shell__main {
     padding: 22px 18px 32px;
   }
 
@@ -1359,6 +1474,11 @@ function handleRewardDelivered(item) {
 @media (prefers-reduced-motion: reduce) {
   .workspace-shell__profile button {
     transition: none;
+  }
+
+  .workspace-shell__nav-slider,
+  .workspace-shell__page-track {
+    transition-duration: 1ms;
   }
 
   .season-workspace-card__inner {

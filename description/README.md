@@ -62,6 +62,7 @@ description/
 当前已建立：
 
 - [`architecture/page-zoom-guard.md`](architecture/page-zoom-guard.md)：管理端页面缩放限制及浏览器边界。
+- [`architecture/page-scroll-boundary.md`](architecture/page-scroll-boundary.md)：根页面锁定与内部业务容器的滚动边界。
 
 ### 功能文档
 
@@ -73,8 +74,10 @@ description/
 
 | 建议文档 | 内容范围 | 状态 |
 | --- | --- | --- |
-| `features/season-management.md` | 赛季列表、新增、编辑和状态管理 | `待创建` |
-| `features/challenge-management.md` | 项目、挑战等级、规则和上传配置 | `待创建` |
+| [`features/season-management.md`](features/season-management.md) | 赛季列表、新增、编辑和状态管理 | `原型版` |
+| [`features/challenge-management.md`](features/challenge-management.md) | 项目、挑战等级、规则和上传配置 | `原型版` |
+| [`features/platform-configuration.md`](features/platform-configuration.md) | 平台配置入口、页面切换与模块范围 | `原型版` |
+| [`features/user-affairs.md`](features/user-affairs.md) | 用户事务入口、页面切换与三类业务范围 | `原型版` |
 | [`features/proof-review.md`](features/proof-review.md) | 运动凭证查询、逐条查看和终审 | `原型版` |
 | [`features/mall-management.md`](features/mall-management.md) | 商品、兑换记录和奖品发放管理 | `原型版` |
 | [`features/user-suggestion-management.md`](features/user-suggestion-management.md) | 新用户意见查看与后续处理边界 | `原型版` |
@@ -90,14 +93,29 @@ description/
 当前已建立：
 
 - [`components/auth/AccessKeyLoginCard.md`](components/auth/AccessKeyLoginCard.md)：管理端单密钥登录卡片。
+- [`components/configuration/PlatformConfigurationPage.md`](components/configuration/PlatformConfigurationPage.md)：平台配置模块的页面骨架与配置域概览。
+- [`components/configuration/ChallengeLevelConfiguration.md`](components/configuration/ChallengeLevelConfiguration.md)：挑战等级名称与达成奖励积分的卡片式概览。
+- [`components/configuration/ChallengeLevelCreateSheet.md`](components/configuration/ChallengeLevelCreateSheet.md)：从等级容器底部升起的新增挑战等级表单。
+- [`components/configuration/SportProjectConfiguration.md`](components/configuration/SportProjectConfiguration.md)：运动项目卡片及放大翻转后的各等级规则概览。
+- [`components/configuration/SportProjectCreateSheet.md`](components/configuration/SportProjectCreateSheet.md)：项目资料、等级规则与凭证上传配置组成的三步新建表单。
+- [`components/configuration/RewardConfiguration.md`](components/configuration/RewardConfiguration.md)：按积分升序展示并支持翻面编辑、隐藏和删除的奖品配置卡片。
+- [`components/configuration/RewardCreateSheet.md`](components/configuration/RewardCreateSheet.md)：采集商品名称、描述、积分和图片的新增商品表单。
+- [`components/configuration/SeasonBasicConfiguration.md`](components/configuration/SeasonBasicConfiguration.md)：当前赛季与历史赛季的卡片式概览。
+- [`components/configuration/SeasonCreateSheet.md`](components/configuration/SeasonCreateSheet.md)：从赛季容器底部升起的新建赛季表单。
+- [`components/configuration/SeasonProjectEnrollmentChart.md`](components/configuration/SeasonProjectEnrollmentChart.md)：赛季背面的各运动项目参与人数横向柱状图。
+- [`components/configuration/WheelPickerColumn.md`](components/configuration/WheelPickerColumn.md)：日期与项目个数共用的单列滚轮选择器。
 - [`components/dashboard/ChallengeLevelEnrollmentCard.md`](components/dashboard/ChallengeLevelEnrollmentCard.md)：可翻转的挑战等级报名与人员名单卡片。
 - [`components/dashboard/ChallengeLevelPieChart.md`](components/dashboard/ChallengeLevelPieChart.md)：挑战等级报名人数饼状图。
 - [`components/dashboard/EnrollmentFlipCard.md`](components/dashboard/EnrollmentFlipCard.md)：等级与项目报名卡片共用的翻转及人员名单容器。
 - [`components/dashboard/ProjectEnrollmentCard.md`](components/dashboard/ProjectEnrollmentCard.md)：可翻转的项目报名与人员名单卡片。
 - [`components/dashboard/ProjectEnrollmentBarChart.md`](components/dashboard/ProjectEnrollmentBarChart.md)：运动项目报名人数横向柱状图。
-- [`components/dashboard/SeasonProofReviewDeck.md`](components/dashboard/SeasonProofReviewDeck.md)：当前赛季卡片背面的逐条运动凭证终审卡组。
+- [`components/dashboard/SeasonProofReviewDeck.md`](components/dashboard/SeasonProofReviewDeck.md)：当前赛季卡片背面的待审列表与单条凭证终审工作区。
 - [`components/dashboard/SeasonTaskListPanel.md`](components/dashboard/SeasonTaskListPanel.md)：当前赛季卡片背面的通用待办列表。
 - [`components/layout/MainWorkspaceShell.md`](components/layout/MainWorkspaceShell.md)：登录后的悬浮式管理工作台外壳。
+- [`components/layout/WorkspaceModuleLayout.md`](components/layout/WorkspaceModuleLayout.md)：平台配置与用户事务共用的左栏模块页面骨架。
+- [`components/user-affairs/UserAffairsPage.md`](components/user-affairs/UserAffairsPage.md)：积分发放、运动记录和兑换记录的用户事务页面骨架。
+- [`components/user-affairs/PointDistributionPanel.md`](components/user-affairs/PointDistributionPanel.md)：按已结束赛季查看用户项目进度、处理积分发放并导出 Excel 的列表面板。
+- [`components/user-affairs/ProofRecordQueryPanel.md`](components/user-affairs/ProofRecordQueryPanel.md)：复用于运动与兑换记录、按 JSON 键动态渲染表格并导出结果的智能查询面板。
 - [`components/visual/FlowingGradientBackground.md`](components/visual/FlowingGradientBackground.md)：全屏 WebGL 流动渐变背景组件。
 - [`components/visual/FloatingSportIcons.md`](components/visual/FloatingSportIcons.md)：运动图标偶发漂移与鼠标排斥组件。
 
