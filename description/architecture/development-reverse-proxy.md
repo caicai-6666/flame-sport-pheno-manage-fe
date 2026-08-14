@@ -96,7 +96,7 @@ fetch(resolveApiRequestPath('seasons'))
 npm run dev
 ```
 
-生产构建使用 `/flame/admin/`，不会携带 `/dev` 前缀。生产 Nginx 或静态资源服务器需要将该路径映射到管理端构建产物；具体生产上游端口仍待部署时确认。
+生产构建使用 `/flame/admin/`，不会携带 `/dev` 前缀。根 Docker Compose 中的 `manage-frontend` 服务默认映射到 `127.0.0.1:18081`，并在容器内把同源 `/flame/admin/api` 请求转发到管理端后端。完整部署关系参见 [管理端前端 Docker Compose 部署](docker-compose-deployment.md)。
 
 ## 代理头与热更新
 
@@ -106,10 +106,10 @@ npm run dev
 
 ## 当前限制
 
-> [!WARNING]
-> 管理端后端仓库当前尚未提供可运行的 HTTP 应用。`127.0.0.1:8001` 是与现有客户端后端 `8000` 配对的预留端口，后端接入时必须保持该端口，或同步修改 Nginx 配置和本文档。
+开发环境继续由远程 IDE 启动 Vite `8081` 和 FastAPI `8001`，生产 Compose 使用宿主机回环端口 `18081` 和 `18001`，两套端口不会冲突。
 
-后端最终采用的接口框架、启动命令和 `/flame/admin/api` 契约仍待管理端后端实现确认。Nginx 路由只负责转发请求，不替代后端路由定义。
+> [!WARNING]
+> 当前宿主机 Nginx 的生产 `/flame/` 仍处于维护提示状态。正式开放管理端前，需要增加更具体的 `/flame/admin/` 生产代理并通过 `nginx -t`，不能仅启动容器就认为公网入口已经开放。
 
 ## 验证方式
 

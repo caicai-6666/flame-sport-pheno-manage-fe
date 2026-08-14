@@ -62,6 +62,7 @@ description/
 当前已建立：
 
 - [`architecture/development-reverse-proxy.md`](architecture/development-reverse-proxy.md)：管理端开发与生产模式的请求路径，以及开发服务的 Nginx 转发约定。
+- [`architecture/docker-compose-deployment.md`](architecture/docker-compose-deployment.md)：管理端前端容器构建、同源 API 转发、缓存策略和生产入口约定。
 - [`architecture/page-zoom-guard.md`](architecture/page-zoom-guard.md)：管理端页面缩放限制及浏览器边界。
 - [`architecture/page-scroll-boundary.md`](architecture/page-scroll-boundary.md)：根页面锁定与内部业务容器的滚动边界。
 

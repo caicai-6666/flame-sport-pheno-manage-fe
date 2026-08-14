@@ -1,0 +1,20 @@
+.git
+.gitignore
+.idea
+.vscode
+
+# Vite 构建参数由 Compose 显式注入，禁止把本地环境文件复制进镜像。
+.env
+.env.*
+!.env.example
+
+node_modules/
+dist/
+coverage/
+
+concept/
+description/
+tests/
+AGENTS.md
+README.md
+*.log
