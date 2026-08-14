@@ -1,7 +1,23 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
+import {
+  formatImageSize,
+  processProductImage,
+  ProductImageProcessingError,
+} from '../../utils/productImageProcessor.js'
 
-const emit = defineEmits(['cancel', 'submit'])
+const props = defineProps({
+  submitting: {
+    type: Boolean,
+    default: false,
+  },
+  submitError: {
+    type: String,
+    default: '',
+  },
+})
+
+const emit = defineEmits(['cancel', 'clear-error', 'submit'])
 
 const nameInputRef = ref(null)
 const name = ref('')
@@ -9,72 +25,70 @@ const description = ref('')
 const pointsRequired = ref('')
 const imageDataUrl = ref('')
 const imageFileName = ref('')
-const artworkHeight = ref(176)
+const imageAspectRatio = ref(1)
+const processedImageFile = ref(null)
+const processedImageSize = ref(0)
+const isImageProcessing = ref(false)
 const validationMessage = ref('')
 const imageValidationMessage = ref('')
+const isCreateConfirmationActive = ref(false)
 
 let focusTimerId = 0
+let createConfirmationTimerId = 0
+const CREATE_CONFIRMATION_TIMEOUT_MS = 3000
 
-function clearValidation() {
-  validationMessage.value = ''
+function clearCreateConfirmation() {
+  window.clearTimeout(createConfirmationTimerId)
+  createConfirmationTimerId = 0
+  isCreateConfirmationActive.value = false
 }
 
-function handleImageSelection(event) {
+function clearValidation() {
+  clearCreateConfirmation()
+  validationMessage.value = ''
+  emit('clear-error')
+}
+
+async function handleImageSelection(event) {
   const [file] = event.target.files ?? []
   imageValidationMessage.value = ''
 
   if (!file) return
 
-  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
-    imageValidationMessage.value = '请选择 PNG、JPG 或 WebP 图片'
+  clearCreateConfirmation()
+  emit('clear-error')
+  isImageProcessing.value = true
+  try {
+    const processedImage = await processProductImage(file)
+    imageDataUrl.value = processedImage.dataUrl
+    imageFileName.value = processedImage.fileName
+    imageAspectRatio.value = processedImage.aspectRatio
+    processedImageFile.value = processedImage.file
+    processedImageSize.value = processedImage.size
+  } catch (error) {
+    imageValidationMessage.value = error instanceof ProductImageProcessingError
+      ? error.message
+      : '奖品图片压缩失败，请重新选择'
     event.target.value = ''
-    return
+  } finally {
+    isImageProcessing.value = false
   }
-
-  if (file.size > 5 * 1024 * 1024) {
-    imageValidationMessage.value = '图片大小不能超过 5 MB'
-    event.target.value = ''
-    return
-  }
-
-  const reader = new FileReader()
-  reader.addEventListener('load', () => {
-    const dataUrl = String(reader.result ?? '')
-    imageDataUrl.value = dataUrl
-    imageFileName.value = file.name
-
-    const image = new Image()
-    image.addEventListener('load', () => {
-      const aspectRatio = image.naturalWidth / image.naturalHeight
-
-      // 新建商品沿用奖品卡片的图片比例分档，保证提交后瀑布流高度稳定。
-      if (aspectRatio >= 1.5) artworkHeight.value = 136
-      else if (aspectRatio >= 1.12) artworkHeight.value = 156
-      else if (aspectRatio >= 0.86) artworkHeight.value = 180
-      else if (aspectRatio >= 0.65) artworkHeight.value = 206
-      else artworkHeight.value = 230
-    })
-    image.src = dataUrl
-  })
-  reader.addEventListener('error', () => {
-    imageValidationMessage.value = '图片读取失败，请重新选择'
-  })
-  reader.readAsDataURL(file)
 }
 
 function handleSubmit() {
+  if (isImageProcessing.value || props.submitting) return
   const normalizedName = name.value.trim()
   const normalizedDescription = description.value.trim()
   const normalizedPoints = Number(pointsRequired.value)
 
   if (!normalizedName) {
-    validationMessage.value = '请填写商品名称'
+    validationMessage.value = '请填写奖品名称'
     nameInputRef.value?.focus()
     return
   }
 
   if (normalizedDescription.length > 255) {
-    validationMessage.value = '商品描述不能超过 255 个字符'
+    validationMessage.value = '奖品描述不能超过 255 个字符'
     return
   }
 
@@ -88,39 +102,74 @@ function handleSubmit() {
     return
   }
 
+  if (!processedImageFile.value) {
+    validationMessage.value = '请选择奖品图片'
+    return
+  }
+
+  if (!isCreateConfirmationActive.value) {
+    validationMessage.value = ''
+    isCreateConfirmationActive.value = true
+    createConfirmationTimerId = window.setTimeout(
+      clearCreateConfirmation,
+      CREATE_CONFIRMATION_TIMEOUT_MS,
+    )
+    return
+  }
+
+  clearCreateConfirmation()
+
   emit('submit', {
     name: normalizedName,
     description: normalizedDescription,
     pointsRequired: normalizedPoints,
     imageDataUrl: imageDataUrl.value,
-    artworkHeight: artworkHeight.value,
+    imageFile: processedImageFile.value,
+    imageAspectRatio: imageAspectRatio.value,
   })
 }
 
 function handleBackdropClick(event) {
-  if (event.target === event.currentTarget) emit('cancel')
+  if (!props.submitting && event.target === event.currentTarget) emit('cancel')
+}
+
+function handleEscape() {
+  if (props.submitting) return
+  if (isCreateConfirmationActive.value) {
+    clearCreateConfirmation()
+    return
+  }
+  emit('cancel')
 }
 
 onMounted(() => {
   focusTimerId = window.setTimeout(() => nameInputRef.value?.focus(), 420)
 })
 
-onBeforeUnmount(() => window.clearTimeout(focusTimerId))
+onBeforeUnmount(() => {
+  window.clearTimeout(focusTimerId)
+  window.clearTimeout(createConfirmationTimerId)
+})
 </script>
 
 <template>
   <div
     class="reward-create-layer"
     @click="handleBackdropClick"
-    @keydown.esc.prevent="emit('cancel')"
+    @keydown.esc.prevent="handleEscape"
   >
-    <section class="reward-create-sheet" role="dialog" aria-modal="true" aria-label="新增商品">
+    <section class="reward-create-sheet" role="dialog" aria-modal="true" aria-label="新增奖品">
       <header class="reward-create-sheet__header">
         <div>
-          <h2>新增商品</h2>
+          <h2>新增奖品</h2>
           <span>设置商城展示资料与兑换积分</span>
         </div>
-        <button type="button" aria-label="关闭新增商品表单" @click="emit('cancel')">
+        <button
+          type="button"
+          aria-label="关闭新增奖品表单"
+          :disabled="props.submitting"
+          @click="emit('cancel')"
+        >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="m7 7 10 10M17 7 7 17" />
           </svg>
@@ -132,11 +181,12 @@ onBeforeUnmount(() => window.clearTimeout(focusTimerId))
           <label class="reward-create-sheet__image-field">
             <input
               type="file"
+              :disabled="isImageProcessing || props.submitting"
               accept="image/png,image/jpeg,image/webp"
               @change="handleImageSelection"
             />
             <span class="reward-create-sheet__image-preview">
-              <img v-if="imageDataUrl" :src="imageDataUrl" alt="商品图片预览" />
+              <img v-if="imageDataUrl" :src="imageDataUrl" alt="奖品图片预览" />
               <svg v-else viewBox="0 0 72 64" aria-hidden="true">
                 <path d="M17 28h38v27H17zM36 28v27M14 28h44v-9H14z" />
                 <path d="M36 19H25c-6 0-7-9-1-10 5-1 9 4 12 10zm0 0h11c6 0 7-9 1-10-5-1-9 4-12 10z" />
@@ -145,18 +195,21 @@ onBeforeUnmount(() => window.clearTimeout(focusTimerId))
                 <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
               </i>
             </span>
-            <strong>{{ imageFileName || '选择商品图片' }}</strong>
-            <small>{{ imageValidationMessage || 'PNG / JPG / WebP，最大 5 MB' }}</small>
+            <strong>{{ isImageProcessing ? '正在等比压缩图片…' : imageFileName || '选择奖品图片' }}</strong>
+            <small v-if="imageValidationMessage || processedImageSize">
+              {{ imageValidationMessage || `已转为 WebP · ${formatImageSize(processedImageSize)}` }}
+            </small>
           </label>
 
           <div class="reward-create-sheet__fields">
             <div class="reward-create-sheet__field-row">
               <label>
-                <span>商品名称</span>
+                <span>奖品名称</span>
                 <input
                   ref="nameInputRef"
                   v-model="name"
                   maxlength="128"
+                  :disabled="props.submitting"
                   autocomplete="off"
                   placeholder="例如：运动水杯"
                   @input="clearValidation"
@@ -173,6 +226,7 @@ onBeforeUnmount(() => window.clearTimeout(focusTimerId))
                     max="4294967295"
                     step="1"
                     inputmode="numeric"
+                    :disabled="props.submitting"
                     placeholder="例如：200"
                     @input="clearValidation"
                   />
@@ -182,12 +236,13 @@ onBeforeUnmount(() => window.clearTimeout(focusTimerId))
             </div>
 
             <label>
-              <span>商品描述</span>
+              <span>奖品描述</span>
               <textarea
                 v-model="description"
                 maxlength="255"
+                :disabled="props.submitting"
                 rows="3"
-                placeholder="简要说明商品特点与适用场景"
+                placeholder="简要说明奖品特点与适用场景"
                 @input="clearValidation"
               ></textarea>
             </label>
@@ -195,12 +250,29 @@ onBeforeUnmount(() => window.clearTimeout(focusTimerId))
         </div>
 
         <footer class="reward-create-sheet__footer">
-          <p :class="{ 'is-visible': validationMessage }" role="alert">
-            {{ validationMessage || '新商品创建后默认展示在积分商城' }}
+          <p
+            :class="{ 'is-visible': validationMessage || props.submitError || isCreateConfirmationActive }"
+            :role="validationMessage || props.submitError ? 'alert' : 'status'"
+          >
+            {{ validationMessage
+              || props.submitError
+              || (isCreateConfirmationActive
+                ? '请在 3 秒内再次点击确认创建'
+                : '新奖品创建后默认展示在积分商城') }}
           </p>
           <div>
-            <button type="button" @click="emit('cancel')">取消</button>
-            <button type="submit">创建商品</button>
+            <button
+              type="submit"
+              :class="{ 'is-confirming': isCreateConfirmationActive }"
+              :disabled="isImageProcessing || props.submitting"
+              :aria-busy="props.submitting"
+            >
+              {{ props.submitting
+                ? '创建中'
+                : isImageProcessing
+                ? '图片处理中'
+                : isCreateConfirmationActive ? '确认创建' : '创建奖品' }}
+            </button>
           </div>
         </footer>
       </form>
@@ -524,6 +596,7 @@ onBeforeUnmount(() => window.clearTimeout(focusTimerId))
 }
 
 .reward-create-sheet__footer button {
+  position: relative;
   min-width: 108px;
   height: 43px;
   color: #657068;
@@ -535,9 +608,40 @@ onBeforeUnmount(() => window.clearTimeout(focusTimerId))
   border: 1px solid rgb(75 91 82 / 10%);
   border-radius: 13px;
   cursor: pointer;
+  overflow: hidden;
   transition:
     box-shadow 340ms ease,
     transform 400ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.reward-create-sheet__footer button::after {
+  position: absolute;
+  right: 10px;
+  bottom: 4px;
+  left: 10px;
+  height: 2px;
+  background: currentColor;
+  border-radius: 999px;
+  content: '';
+  opacity: 0;
+  transform: scaleX(1);
+  transform-origin: left center;
+}
+
+.reward-create-sheet__footer button.is-confirming {
+  box-shadow: 0 14px 28px rgb(191 104 57 / 28%);
+  transform: translateY(-2px) scale(1.025);
+}
+
+.reward-create-sheet__footer button.is-confirming::after {
+  opacity: 0.78;
+  animation: reward-create-confirmation-countdown 3s linear forwards;
+}
+
+@keyframes reward-create-confirmation-countdown {
+  to {
+    transform: scaleX(0);
+  }
 }
 
 .reward-create-sheet__footer button:last-child {
@@ -550,6 +654,12 @@ onBeforeUnmount(() => window.clearTimeout(focusTimerId))
 .reward-create-sheet__footer button:hover {
   box-shadow: 0 12px 24px rgb(63 69 60 / 12%);
   transform: translateY(-2px);
+}
+
+.reward-create-sheet__footer button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+  transform: none;
 }
 
 @media (max-width: 660px) {
@@ -571,6 +681,10 @@ onBeforeUnmount(() => window.clearTimeout(focusTimerId))
   .reward-create-sheet__image-field,
   .reward-create-sheet__footer button {
     transition-duration: 1ms;
+  }
+
+  .reward-create-sheet__footer button.is-confirming::after {
+    animation: none;
   }
 }
 </style>

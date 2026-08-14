@@ -1,15 +1,31 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { resolveMinimumSeasonEndDate } from '../../services/seasonDateRange.js'
 import WheelPickerColumn from './WheelPickerColumn.vue'
+
+const CREATE_CONFIRMATION_TIMEOUT_MS = 3000
 
 const props = defineProps({
   minimumStartDate: {
     type: String,
     default: '',
   },
+  maximumProjectCount: {
+    type: Number,
+    required: true,
+    validator: (value) => Number.isInteger(value) && value > 0,
+  },
+  submitting: {
+    type: Boolean,
+    default: false,
+  },
+  submitError: {
+    type: String,
+    default: '',
+  },
 })
 
-const emit = defineEmits(['cancel', 'submit'])
+const emit = defineEmits(['cancel', 'clear-error', 'submit'])
 
 function parseLocalDate(value) {
   const [year, month, day] = value.split('-').map(Number)
@@ -30,7 +46,8 @@ function createDefaultDateRange(minimumStartDate) {
   const now = new Date()
   const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1)
   const start = nextMonthStart < minimumStartDate ? minimumStartDate : nextMonthStart
-  const end = new Date(start.getFullYear(), start.getMonth() + 1, 1)
+  const minimumEndDate = resolveMinimumSeasonEndDate(toDateParts(start))
+  const end = new Date(minimumEndDate.year, minimumEndDate.month - 1, minimumEndDate.day)
 
   return { start, end }
 }
@@ -58,11 +75,13 @@ const defaultRange = createDefaultDateRange(resolveMinimumStartDate())
 const seasonName = ref('')
 const startDate = reactive(toDateParts(defaultRange.start))
 const endDate = reactive(toDateParts(defaultRange.end))
-const requiredProjectCount = ref(3)
+const requiredProjectCount = ref(Math.min(3, props.maximumProjectCount))
 const validationMessage = ref('')
+const isCreateConfirmationActive = ref(false)
 const nameInputRef = ref(null)
 
 let focusTimerId = 0
+let createConfirmationTimerId = 0
 
 const startYearOptions = Array.from({ length: 5 }, (_, index) => ({
   value: minimumStartDate.year + index,
@@ -76,10 +95,12 @@ const monthOptions = Array.from({ length: 12 }, (_, index) => ({
   value: index + 1,
   label: `${index + 1} 月`,
 }))
-const projectCountOptions = Array.from({ length: 8 }, (_, index) => ({
-  value: index + 1,
-  label: `${index + 1} 个`,
-}))
+const projectCountOptions = computed(() =>
+  Array.from({ length: props.maximumProjectCount }, (_, index) => ({
+    value: index + 1,
+    label: `${index + 1} 个`,
+  })),
+)
 
 const startMonthOptions = computed(() =>
   monthOptions.filter(
@@ -98,18 +119,22 @@ const startDayOptions = computed(() => {
     label: `${minimumDay + index} 日`,
   }))
 })
+const minimumEndDate = computed(() => resolveMinimumSeasonEndDate(startDate))
 const endYearOptions = computed(() =>
-  endYearUniverse.filter((option) => option.value >= startDate.year),
+  endYearUniverse.filter((option) => option.value >= minimumEndDate.value.year),
 )
 const endMonthOptions = computed(() =>
   monthOptions.filter(
-    (option) => endDate.year > startDate.year || option.value >= startDate.month,
+    (option) =>
+      endDate.year > minimumEndDate.value.year
+      || option.value >= minimumEndDate.value.month,
   ),
 )
 const endDayOptions = computed(() => {
   const minimumDay =
-    endDate.year === startDate.year && endDate.month === startDate.month
-      ? startDate.day
+    endDate.year === minimumEndDate.value.year
+      && endDate.month === minimumEndDate.value.month
+      ? minimumEndDate.value.day
       : 1
   const maximumDay = getDaysInMonth(endDate.year, endDate.month)
 
@@ -119,7 +144,7 @@ const endDayOptions = computed(() => {
   }))
 })
 
-// 起始日期一旦变化，结束日期就回到“下一个自然月 1 日”，确保操作顺序始终明确。
+// 起始日期一旦变化，结束日期就回到满一个自然月的最早日期，避免滚轮保留过短区间。
 watch(
   () => [startDate.year, startDate.month, startDate.day],
   () => {
@@ -134,13 +159,12 @@ watch(
       return
     }
 
-    const defaultEndDate = new Date(startDate.year, startDate.month, 1)
-    Object.assign(endDate, toDateParts(defaultEndDate))
+    Object.assign(endDate, minimumEndDate.value)
     validationMessage.value = ''
   },
 )
 
-// 动态选项已经隐藏更早日期，此处继续兜底处理快速滚动产生的瞬时无效组合。
+// 动态选项已经隐藏不足一个月的日期，此处继续兜底处理快速滚动产生的瞬时无效组合。
 watch(
   () => [endDate.year, endDate.month, endDate.day],
   () => {
@@ -150,11 +174,30 @@ watch(
       return
     }
 
-    if (formatDate(endDate) < formatDate(startDate)) Object.assign(endDate, startDate)
+    if (formatDate(endDate) < formatDate(minimumEndDate.value)) {
+      Object.assign(endDate, minimumEndDate.value)
+    }
   },
 )
 
-function handleSubmit() {
+// 可见项目列表发生刷新时同步收紧当前值，避免表单保留已经超出上限的旧选项。
+watch(
+  () => props.maximumProjectCount,
+  (maximumProjectCount) => {
+    clearCreateConfirmation()
+    if (requiredProjectCount.value > maximumProjectCount) {
+      requiredProjectCount.value = maximumProjectCount
+    }
+  },
+)
+
+function clearCreateConfirmation() {
+  window.clearTimeout(createConfirmationTimerId)
+  createConfirmationTimerId = 0
+  isCreateConfirmationActive.value = false
+}
+
+function validateSeasonDraft() {
   const normalizedName = seasonName.value.trim()
   const normalizedStartDate = formatDate(startDate)
   const normalizedEndDate = formatDate(endDate)
@@ -162,48 +205,108 @@ function handleSubmit() {
   if (!normalizedName) {
     validationMessage.value = '请填写赛季名称'
     nameInputRef.value?.focus()
-    return
+    return null
   }
 
   if (normalizedStartDate < formatDate(minimumStartDate)) {
     validationMessage.value = '开始日期必须晚于已有最新赛季的结束日期'
-    return
+    return null
   }
 
-  if (normalizedEndDate < normalizedStartDate) {
-    validationMessage.value = '赛季结束日期不能早于开始日期'
-    return
+  if (normalizedEndDate < formatDate(minimumEndDate.value)) {
+    validationMessage.value = '赛季持续时间不能少于一个月'
+    return null
+  }
+
+  if (
+    !Number.isInteger(requiredProjectCount.value)
+    || requiredProjectCount.value < 1
+    || requiredProjectCount.value > props.maximumProjectCount
+  ) {
+    validationMessage.value = `要求项目个数不能超过当前可见的 ${props.maximumProjectCount} 个项目`
+    return null
   }
 
   validationMessage.value = ''
-  emit('submit', {
+  return {
     name: normalizedName,
     startDate: normalizedStartDate,
     endDate: normalizedEndDate,
     requiredProjectCount: requiredProjectCount.value,
-  })
+  }
+}
+
+function handleSubmit() {
+  if (props.submitting) return
+
+  const payload = validateSeasonDraft()
+  if (!payload) {
+    clearCreateConfirmation()
+    return
+  }
+
+  if (!isCreateConfirmationActive.value) {
+    emit('clear-error')
+    isCreateConfirmationActive.value = true
+    createConfirmationTimerId = window.setTimeout(
+      clearCreateConfirmation,
+      CREATE_CONFIRMATION_TIMEOUT_MS,
+    )
+    return
+  }
+
+  clearCreateConfirmation()
+  emit('submit', payload)
 }
 
 function handleBackdropClick(event) {
-  if (event.target === event.currentTarget) emit('cancel')
+  if (!props.submitting && event.target === event.currentTarget) emit('cancel')
 }
+
+function clearFeedback() {
+  clearCreateConfirmation()
+  validationMessage.value = ''
+  emit('clear-error')
+}
+
+const footerMessage = computed(() => {
+  if (validationMessage.value) return validationMessage.value
+  if (props.submitError) return props.submitError
+  if (props.submitting) return '正在创建赛季…'
+  if (isCreateConfirmationActive.value) return '请在 3 秒内再次点击“确认创建”'
+  return '请检查赛季信息后再创建'
+})
 
 onMounted(() => {
   focusTimerId = window.setTimeout(() => nameInputRef.value?.focus(), 480)
 })
 
-onBeforeUnmount(() => window.clearTimeout(focusTimerId))
+onBeforeUnmount(() => {
+  window.clearTimeout(focusTimerId)
+  clearCreateConfirmation()
+})
 </script>
 
 <template>
   <div class="season-create-layer" @click="handleBackdropClick">
-    <section class="season-create-sheet" role="dialog" aria-modal="true" aria-label="新建赛季">
+    <section
+      class="season-create-sheet"
+      role="dialog"
+      aria-modal="true"
+      aria-label="新建赛季"
+      :aria-busy="submitting"
+    >
       <header class="season-create-sheet__header">
         <div>
           <h2>新建赛季</h2>
           <span>设置新一轮运动挑战的基础信息</span>
         </div>
-        <button type="button" aria-label="关闭新建赛季表单" @click="emit('cancel')">
+        <button
+          type="button"
+          aria-label="关闭新建赛季表单"
+          :disabled="submitting"
+          @click="emit('cancel')"
+        >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="m7 7 10 10M17 7 7 17" />
           </svg>
@@ -219,36 +322,37 @@ onBeforeUnmount(() => window.clearTimeout(focusTimerId))
               v-model="seasonName"
               type="text"
               maxlength="64"
+              :disabled="submitting"
               autocomplete="off"
               placeholder="例如：金秋燃动 · 九月赛季"
-              @input="validationMessage = ''"
+              @input="clearFeedback"
             />
           </label>
 
           <div class="season-create-sheet__pickers">
-            <fieldset class="season-wheel-field">
+            <fieldset class="season-wheel-field" :disabled="submitting">
               <legend>
                 <span>赛季开始日期</span>
               </legend>
               <div class="season-wheel-field__date">
-                <WheelPickerColumn v-model="startDate.year" :options="startYearOptions" aria-label="开始年份" />
-                <WheelPickerColumn v-model="startDate.month" :options="startMonthOptions" aria-label="开始月份" />
-                <WheelPickerColumn v-model="startDate.day" :options="startDayOptions" aria-label="开始日期" />
+                <WheelPickerColumn v-model="startDate.year" :options="startYearOptions" aria-label="开始年份" :disabled="submitting" @update:model-value="clearFeedback" />
+                <WheelPickerColumn v-model="startDate.month" :options="startMonthOptions" aria-label="开始月份" :disabled="submitting" @update:model-value="clearFeedback" />
+                <WheelPickerColumn v-model="startDate.day" :options="startDayOptions" aria-label="开始日期" :disabled="submitting" @update:model-value="clearFeedback" />
               </div>
             </fieldset>
 
-            <fieldset class="season-wheel-field">
+            <fieldset class="season-wheel-field" :disabled="submitting">
               <legend>
                 <span>赛季结束日期</span>
               </legend>
               <div class="season-wheel-field__date">
-                <WheelPickerColumn v-model="endDate.year" :options="endYearOptions" aria-label="结束年份" />
-                <WheelPickerColumn v-model="endDate.month" :options="endMonthOptions" aria-label="结束月份" />
-                <WheelPickerColumn v-model="endDate.day" :options="endDayOptions" aria-label="结束日期" />
+                <WheelPickerColumn v-model="endDate.year" :options="endYearOptions" aria-label="结束年份" :disabled="submitting" @update:model-value="clearFeedback" />
+                <WheelPickerColumn v-model="endDate.month" :options="endMonthOptions" aria-label="结束月份" :disabled="submitting" @update:model-value="clearFeedback" />
+                <WheelPickerColumn v-model="endDate.day" :options="endDayOptions" aria-label="结束日期" :disabled="submitting" @update:model-value="clearFeedback" />
               </div>
             </fieldset>
 
-            <fieldset class="season-wheel-field season-wheel-field--count">
+            <fieldset class="season-wheel-field season-wheel-field--count" :disabled="submitting">
               <legend>
                 <span>要求的项目个数</span>
               </legend>
@@ -256,20 +360,43 @@ onBeforeUnmount(() => window.clearTimeout(focusTimerId))
                 v-model="requiredProjectCount"
                 :options="projectCountOptions"
                 aria-label="要求的项目个数"
+                :disabled="submitting"
+                @update:model-value="clearFeedback"
               />
             </fieldset>
           </div>
         </div>
 
         <footer class="season-create-sheet__footer">
-          <p :class="{ 'is-visible': validationMessage }" role="alert">
-            {{ validationMessage || '请检查赛季信息后再创建' }}
+          <p
+            :class="{
+              'is-visible': validationMessage || submitError,
+              'is-confirming': isCreateConfirmationActive,
+            }"
+            role="status"
+            aria-live="polite"
+          >
+            {{ footerMessage }}
           </p>
           <div>
-            <button type="button" class="season-create-sheet__cancel" @click="emit('cancel')">
+            <button type="button" class="season-create-sheet__cancel" :disabled="submitting" @click="emit('cancel')">
               取消
             </button>
-            <button type="submit" class="season-create-sheet__submit">创建赛季</button>
+            <button
+              type="submit"
+              class="season-create-sheet__submit"
+              :class="{ 'is-confirming': isCreateConfirmationActive }"
+              :disabled="submitting"
+              :aria-pressed="isCreateConfirmationActive"
+            >
+              <span v-if="submitting" class="season-create-sheet__submit-spinner" aria-hidden="true"></span>
+              {{ submitting ? '创建中' : isCreateConfirmationActive ? '确认创建' : '创建赛季' }}
+              <span
+                v-if="isCreateConfirmationActive"
+                class="season-create-sheet__confirm-progress"
+                aria-hidden="true"
+              ></span>
+            </button>
           </div>
         </footer>
       </form>
@@ -483,6 +610,12 @@ onBeforeUnmount(() => window.clearTimeout(focusTimerId))
   opacity: 1;
 }
 
+.season-create-sheet__footer p.is-confirming {
+  color: #6759b6;
+  font-weight: 680;
+  opacity: 1;
+}
+
 .season-create-sheet__footer > div {
   display: flex;
   gap: 9px;
@@ -509,12 +642,66 @@ onBeforeUnmount(() => window.clearTimeout(focusTimerId))
 }
 
 .season-create-sheet__submit {
+  position: relative;
+  min-width: 92px;
+  overflow: hidden;
   color: #f5faf7;
   background: linear-gradient(135deg, #7568cf, #3ca488);
   border: 1px solid rgb(255 255 255 / 17%);
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 18%),
     0 9px 20px rgb(74 77 145 / 22%);
+}
+
+.season-create-sheet__submit.is-confirming {
+  background: linear-gradient(135deg, #6454c6, #7462d1);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 22%),
+    0 11px 24px rgb(79 66 165 / 31%);
+  transform: translateY(-1px) scale(1.025);
+}
+
+.season-create-sheet__confirm-progress {
+  position: absolute;
+  right: 10px;
+  bottom: 3px;
+  left: 10px;
+  height: 2px;
+  background: rgb(255 255 255 / 76%);
+  border-radius: 999px;
+  transform-origin: left;
+  animation: season-create-confirm-progress 3s linear forwards;
+}
+
+.season-create-sheet__footer button:disabled,
+.season-create-sheet__header > button:disabled {
+  cursor: wait;
+  opacity: 0.56;
+  transform: none;
+}
+
+.season-create-sheet__submit-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  vertical-align: -2px;
+  border: 1.5px solid rgb(255 255 255 / 38%);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: season-create-submit-spin 700ms linear infinite;
+}
+
+@keyframes season-create-submit-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes season-create-confirm-progress {
+  to {
+    transform: scaleX(0);
+  }
 }
 
 .season-create-enter-active,
@@ -544,12 +731,12 @@ onBeforeUnmount(() => window.clearTimeout(focusTimerId))
 }
 
 @media (hover: hover) {
-  .season-create-sheet__header > button:hover {
+  .season-create-sheet__header > button:hover:not(:disabled) {
     color: #42386f;
     transform: rotate(90deg) scale(1.04);
   }
 
-  .season-create-sheet__footer button:hover {
+  .season-create-sheet__footer button:hover:not(:disabled) {
     box-shadow: 0 12px 24px rgb(53 67 60 / 16%);
     transform: translateY(-2px) scale(1.015);
   }
@@ -618,6 +805,14 @@ onBeforeUnmount(() => window.clearTimeout(focusTimerId))
   .season-create-sheet__header > button,
   .season-create-sheet__footer button {
     transition: none;
+  }
+
+  .season-create-sheet__submit-spinner {
+    animation: none;
+  }
+
+  .season-create-sheet__confirm-progress {
+    animation: none;
   }
 }
 </style>

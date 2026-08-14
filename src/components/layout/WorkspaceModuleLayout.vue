@@ -75,8 +75,16 @@ function selectItem(item) {
         :aria-current="modelValue === item.id ? 'page' : undefined"
         @click="selectItem(item)"
       >
-        <span class="workspace-module-nav-item__icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24">
+        <span
+          class="workspace-module-nav-item__icon"
+          :class="{
+            'has-image': item.iconSrc,
+            'needs-blend': item.iconNeedsBlend,
+          }"
+          aria-hidden="true"
+        >
+          <img v-if="item.iconSrc" :src="item.iconSrc" alt="" />
+          <svg v-else viewBox="0 0 24 24">
             <path :d="item.iconPath" />
           </svg>
         </span>
@@ -239,6 +247,7 @@ function selectItem(item) {
 }
 
 .workspace-module-nav-item__icon {
+  position: relative;
   display: grid;
   width: 44px;
   height: 44px;
@@ -262,6 +271,38 @@ function selectItem(item) {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.65;
+}
+
+.workspace-module-nav-item__icon img {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 68px;
+  height: 68px;
+  object-fit: contain;
+  opacity: 0.82;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  transform-origin: center;
+  transition:
+    opacity 360ms ease;
+}
+
+.workspace-module-nav-item__icon.has-image {
+  /* 图片画布以绝对定位锚定槽位中心，不再依赖裁切来对齐可见图形。 */
+  overflow: visible;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.workspace-module-nav-item__icon.needs-blend img {
+  /* 白底画布通过融合模式隐藏；图形完整保留，不裁掉描边与抗锯齿边缘。 */
+  mix-blend-mode: multiply;
+}
+
+.workspace-module-nav-item.is-active .workspace-module-nav-item__icon img {
+  opacity: 0.96;
 }
 
 .workspace-module-nav-item__label {
@@ -329,6 +370,11 @@ function selectItem(item) {
     0 7px 15px color-mix(in srgb, var(--workspace-module-item-accent) 13%, transparent);
 }
 
+.workspace-module-nav-item.is-active .workspace-module-nav-item__icon.has-image {
+  background: transparent;
+  box-shadow: none;
+}
+
 .workspace-module-nav-item.is-active .workspace-module-nav-item__state {
   background: color-mix(in srgb, var(--workspace-module-item-accent) 11%, transparent);
   border-color: color-mix(in srgb, var(--workspace-module-item-accent) 14%, transparent);
@@ -374,6 +420,10 @@ function selectItem(item) {
     transform: rotate(-3deg) scale(1.035);
   }
 
+  .workspace-module-nav-item:hover .workspace-module-nav-item__icon img {
+    opacity: 0.92;
+  }
+
   .workspace-module-nav-item:hover .workspace-module-nav-item__state {
     transform: scale(1.08);
   }
@@ -407,6 +457,11 @@ function selectItem(item) {
     height: 38px;
   }
 
+  .workspace-module-nav-item__icon.has-image img {
+    width: 60px;
+    height: 60px;
+  }
+
   .workspace-module-nav-item.is-active {
     background: color-mix(in srgb, var(--workspace-module-item-accent) 14%, white);
     border-color: color-mix(in srgb, var(--workspace-module-item-accent) 22%, transparent);
@@ -426,6 +481,7 @@ function selectItem(item) {
   .workspace-module-nav-item,
   .workspace-module-nav-slider,
   .workspace-module-nav-item__icon,
+  .workspace-module-nav-item__icon img,
   .workspace-module-nav-item__state,
   .workspace-module-nav-item__state i {
     transition: none;

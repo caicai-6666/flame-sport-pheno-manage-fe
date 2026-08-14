@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# 本地与部署环境变量默认不提交，仅保留无敏感信息的模式配置和示例。
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

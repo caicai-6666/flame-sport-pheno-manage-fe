@@ -1,18 +1,19 @@
 # ProjectEnrollmentCard
 
-`ProjectEnrollmentCard` 将项目报名横向柱状图与项目报名人员列表组合为一张宽幅可翻转卡片。
+`ProjectEnrollmentCard` 展示各运动项目的报名人数，并在点击项目时请求工作台打开独立的完成情况名单。
 
 > [!IMPORTANT]
-> 当前名单是视觉原型占位数据。真实列表必须根据当前赛季与所选项目从后端接口分页获取。
+> 项目 ID、名称、图标和展示顺序来自全部项目目录中的 `status = 1` 集合；报名人数、名单和完成进度来自当前赛季项目参赛人员接口的前端聚合结果。
 
 ---
 
 ## 组件职责
 
-- 正面展示各运动项目报名人数横向柱状图。
-- 接收柱条点击事件并翻转到卡片背面。
-- 背面展示所选项目的报名总人数，并以三列布局展示报名人员、部门和报名日期。
-- 复用 `EnrollmentFlipCard` 的返回按钮、翻转状态和无障碍处理。
+- 正面展示运动项目图标、名称、报名人数和水平柱体。
+- 项目聚合加载完成后，各项目按稳定顺序逐行从下方浮现。
+- 项目过多时正面整体纵向滚动，不提供横向滚动。
+- 点击柱条后原卡片保持统计正面，聚焦层独立展示所选项目的报名总人数、头像、姓名、部门、挑战等级和完成进度。
+- 名单只允许纵向滚动；桌面端使用列标题对齐，移动端重排为紧凑卡片行。
 
 组件不负责请求接口、判断项目锁定记录是否有效或实现服务端分页。
 
@@ -24,6 +25,10 @@
 <ProjectEnrollmentCard
   :items="projectEnrollments"
   :members-by-project="projectEnrollmentMembers"
+  :loading="isProjectEnrollmentLoading"
+  :error="projectEnrollmentError"
+  @focus-ready="handleEnrollmentFocusReady"
+  @retry="retryProjectDashboard"
 />
 ```
 
@@ -33,27 +38,35 @@
 | --- | --- | --- | --- |
 | `items` | `Array` | 是 | 项目统计数组，每项包含 `name`、`value` 和 `color` |
 | `membersByProject` | `Object` | 是 | 以项目名称为键的报名人员数组映射 |
+| `loading` | `Boolean` | 否 | 是否正在获取项目基础信息或聚合报名数据 |
+| `error` | `String` | 否 | 项目基础信息或报名聚合失败提示 |
 
-## 事件、插槽与暴露方法
+## 事件
 
-当前未提供。
+| 事件名 | 参数 | 触发时机 |
+| --- | --- | --- |
+| `retry` | 无 | 用户在项目基础信息或报名聚合失败状态点击“重新加载” |
+| `focus-ready` | `{ type: 'project', item }` | 点击项目后，请求工作台打开大尺寸项目名单 |
+
+## 插槽与暴露方法
+
+当前未提供插槽或暴露方法。
 
 ---
 
 ## 数据关系
 
-真实名单需要以当前赛季和所选 `project_id` 查询有效的 `season_user_project`，再通过 `season_user` 关联用户与部门。同一用户可以锁定多个项目，因此允许出现在多个项目名单中。
+页面使用当前赛季每名正式参赛人员的 `season_user_id` 与每个可见 `project_id` 查询有效项目记录。同一用户可以锁定多个项目，因此允许复用同一份用户资料出现在多个项目名单中。
 
-> [!WARNING]
-> 当前尚无对应的管理端统计接口契约，不得根据数据库文档自行构造接口路径、分页参数或响应结构。
+名单先使用项目响应的 `user_id` 关联已取得的参赛人员资料，再组合姓名、部门、头像、等级与进度。接口中的 `completion_progress` 从 `0～1` 转换为展示用 `0～100` 整数百分比。
 
 ## 依赖与关联代码
 
 - 组件代码：`src/components/dashboard/ProjectEnrollmentCard.vue`
-- 共享翻转容器：`src/components/dashboard/EnrollmentFlipCard.vue`
+- 共享卡片容器：`src/components/dashboard/EnrollmentFlipCard.vue`
 - 横向柱状图：`src/components/dashboard/ProjectEnrollmentBarChart.vue`
+- 人员进度列表：`src/components/dashboard/ProjectEnrollmentMemberList.vue`
 - 当前调用方：`src/components/layout/MainWorkspaceShell.vue`
-- 用户赛季项目关系：`description/db/season_user_project.md`
-- 赛季用户关系：`description/db/season_user.md`
-- 用户信息：`description/db/user.md`
-- 部门信息：`description/db/department.md`
+- 项目列表接口：`src/api/project/projectListApi.js`
+- 项目参赛人员接口：`src/api/dashboard/projectParticipantsApi.js`
+- 项目展示组合：`src/services/projectEnrollmentDashboard.js`

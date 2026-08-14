@@ -1,6 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, useId } from 'vue'
-import brandLogo from '../../assets/logo.png'
+import brandLogo from '../../assets/logo.webp'
 
 const props = defineProps({
   loading: {
@@ -17,26 +17,24 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['submit'])
+const emit = defineEmits(['input', 'submit'])
 
 const inputId = useId()
 const contentRef = ref(null)
 const secretKey = ref('')
 const isKeyVisible = ref(false)
 const isKeyPressing = ref(false)
-const isLocalLoading = ref(false)
 const validationError = ref('')
 const cardHeight = ref('auto')
 const isHeightAnimationReady = ref(false)
 const errorMessage = computed(() => validationError.value || props.error)
-const isSubmitting = computed(() => props.loading || isLocalLoading.value)
+const isSubmitting = computed(() => props.loading)
 const messageId = computed(() => `${inputId}-message`)
 
 let contentResizeObserver
 let heightReadyFrameId = 0
 let keyPressFrameId = 0
 let keyReleaseTimerId = 0
-let localLoadingTimerId = 0
 
 function syncCardHeight() {
   if (!contentRef.value) return
@@ -48,6 +46,8 @@ function syncCardHeight() {
 
 function handleInput() {
   validationError.value = ''
+  // 不向父组件回传密钥内容，只通知其清除上一轮认证反馈。
+  emit('input')
 }
 
 function toggleKeyVisibility() {
@@ -68,16 +68,6 @@ function playKeyPressAnimation() {
   })
 }
 
-function startLoadingFeedback() {
-  window.clearTimeout(localLoadingTimerId)
-  isLocalLoading.value = true
-
-  // 未接入接口时也保留一段可见反馈；接入后由 loading 属性继续维持请求状态。
-  localLoadingTimerId = window.setTimeout(() => {
-    isLocalLoading.value = false
-  }, 2200)
-}
-
 function handleSubmit() {
   if (isSubmitting.value) return
 
@@ -88,9 +78,7 @@ function handleSubmit() {
     return
   }
 
-  startLoadingFeedback()
-
-  // 组件只向调用方提交密钥，不记录日志，也不自行猜测认证接口或持久化方式。
+  // 组件只向调用方提交密钥，不记录日志，也不自行持久化原始凭据。
   emit('submit', secretKey.value)
 }
 
@@ -109,7 +97,6 @@ onBeforeUnmount(() => {
   window.cancelAnimationFrame(heightReadyFrameId)
   window.cancelAnimationFrame(keyPressFrameId)
   window.clearTimeout(keyReleaseTimerId)
-  window.clearTimeout(localLoadingTimerId)
   contentResizeObserver?.disconnect()
 })
 </script>

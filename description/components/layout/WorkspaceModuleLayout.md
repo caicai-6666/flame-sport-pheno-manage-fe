@@ -13,7 +13,7 @@
 - 在模块进入可视区域时，让导航项依次从左侧淡入。
 - 切换分类时，让选中背景平滑移动到目标项，并同步更新强调色。
 - 在窄屏下将纵向导航转换为可横向滚动的顶部导航。
-- 通过默认插槽承载各模块自行管理的业务内容。
+- 支持导航项使用 PNG 图片或内联 SVG 路径，并通过默认插槽承载各模块自行管理的业务内容。
 
 ## 使用方式
 
@@ -36,9 +36,11 @@
   id: 'example',
   label: '示例分类',
   accent: '#7569d5',
-  iconPath: 'SVG path 内容',
+  iconSrc: importedPng,
 }
 ```
+
+导航项应提供 `iconSrc` 或 `iconPath` 之一。存在 `iconSrc` 时优先显示图片；缺少时回退到现有内联 SVG 路径，确保旧调用方保持兼容。不透明白底图片需要设置 `iconNeedsBlend: true`。
 
 ---
 
@@ -68,6 +70,7 @@
 
 - 选中背景根据固定的导航项高度与间距计算位置，跨多个条目切换时不会挤压按钮。
 - 分类数量通过 CSS 变量传入移动端网格，平台配置的 4 项与用户事务的 3 项均可使用同一布局。
+- PNG 图标使用 `object-fit: contain` 保持原始比例，并通过 `50% / 50%` 绝对定位稳定锚定图标槽中心，不裁切图片内容。不透明白底图片使用混合模式隐藏白色底面；图片作为装饰内容不重复朗读，导航按钮文字负责无障碍命名。
 - 系统启用 `prefers-reduced-motion: reduce` 时，取消导航入场、流光和位移动画。
 - 调用方应保证 `modelValue` 对应 `items` 中的有效条目；无法匹配时组件回退到第一项展示。
 
@@ -76,4 +79,3 @@
 - 组件代码：`src/components/layout/WorkspaceModuleLayout.vue`
 - 平台配置：`src/components/configuration/PlatformConfigurationPage.vue`
 - 用户事务：`src/components/user-affairs/UserAffairsPage.vue`
-

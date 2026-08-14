@@ -3,7 +3,7 @@
 `AccessKeyLoginCard` 是管理端登录页使用的单密钥登录卡片，只收集管理员密钥，不要求用户名。
 
 > [!IMPORTANT]
-> 当前仓库尚无管理员密钥认证接口契约。组件只完成输入、校验与提交事件，不虚构请求地址，也不判断登录是否成功。
+> 原始管理员密钥只通过 `submit` 事件交给应用认证层。组件不调用接口、不保存密钥，也不直接读取访问令牌。
 
 ---
 
@@ -21,8 +21,9 @@
 - 将操作区域设计为宽空格键键帽，并在提交时播放下压与回弹反馈。
 - 密钥提交后在整块键帽内播放缓慢流动的多彩渐变，同时将进入按钮切换为彩色加载环。
 - 通过 `submit` 事件将密钥交给调用方处理。
+- 用户继续输入时通过不携带密钥内容的 `input` 事件通知调用方清除上一轮错误。
 
-组件不负责调用接口、保存令牌、跳转页面或维护登录会话。当前原型由 `src/App.vue` 在提交后模拟约 `2200ms` 的校验过程，并在完成后切换到主工作台；该演示不代表真实认证成功。
+组件不负责调用接口、保存令牌、跳转页面或维护登录会话。`src/App.vue` 调用认证服务，并且只在后端成功签发访问令牌后切换到主工作台。
 
 ## 使用方式
 
@@ -36,7 +37,12 @@ function handleLogin(secretKey) {
 </script>
 
 <template>
-  <AccessKeyLoginCard @submit="handleLogin" />
+  <AccessKeyLoginCard
+    :loading="isAuthenticating"
+    :error="loginError"
+    @input="clearLoginError"
+    @submit="handleLogin"
+  />
 </template>
 ```
 
@@ -52,6 +58,7 @@ function handleLogin(secretKey) {
 
 | 事件名 | 参数 | 触发时机 |
 | --- | --- | --- |
+| `input` | 无 | 密钥内容变化时；不向调用方暴露当前内容 |
 | `submit` | `secretKey: string` | 密钥非空且用户提交表单时 |
 
 ## 插槽与暴露方法
@@ -62,7 +69,7 @@ function handleLogin(secretKey) {
 
 空字符串或只包含空白字符的内容不会触发 `submit`，组件会在输入框下显示“请输入管理密钥”。用户继续输入后，本地校验提示自动清除。
 
-接口接入后，父组件应在请求期间设置 `loading`，并通过 `error` 展示认证失败、网络异常或服务不可用等结果。
+父组件在登录和缓存会话校验期间设置 `loading`，并通过 `error` 展示密钥无效、网络异常或服务不可用等结果。用户修改密钥时，组件触发 `input` 让父组件移除旧错误。
 
 组件通过 `ResizeObserver` 监听内部内容高度。高度测量使用不受祖先元素 `transform` 影响的布局高度，避免从工作台返回登录页时，入场缩放造成卡片高度偏小和内容裁切。首次渲染直接确定卡片尺寸，后续错误、提示或其他内容引起的高度变化使用 `300ms` 缓动过渡。
 
@@ -70,7 +77,7 @@ function handleLogin(secretKey) {
 
 表单使用原生 `submit` 语义。点击箭头按钮或在密钥输入框按下 `Enter` 都会进入同一提交处理，并触发约 `150ms` 的键帽按压动画。
 
-密钥通过非空校验后，组件至少展示 `2200ms` 的本地加载反馈。多彩渐变使用约 `620ms` 的透明度过渡缓慢进入和退出，箭头与加载环也通过淡入缩放衔接。父组件设置 `loading = true` 时，键帽内的多彩渐变和加载环会持续到该属性恢复为 `false`；本地反馈只保证接口尚未接入时也能看见交互效果，不代表认证成功。
+密钥通过非空校验后，由父组件的真实请求状态控制加载反馈。多彩渐变使用约 `620ms` 的透明度过渡缓慢进入和退出，箭头与加载环也通过淡入缩放衔接；不存在人为延长的固定等待时间。
 
 ## 选择与无障碍
 
@@ -86,15 +93,17 @@ function handleLogin(secretKey) {
 
 - 组件不写入 `localStorage`、`sessionStorage`、Cookie 或 URL。
 - 输入框关闭自动完成、自动大写和拼写检查。
-- 页面不展示未经后端契约确认的安全承诺文案。
-- 登录成功后的令牌保存方式、过期处理和退出登录规则以后端认证契约为准。
+- 认证层不得将原始密钥输出到日志、错误信息、埋点或文档示例。
+- 登录成功后的令牌由 `src/services/adminSession.js` 保存，具体规则参见 `description/features/admin-authentication.md`。
 
 ## 依赖与关联代码
 
 - 组件代码：`src/components/auth/AccessKeyLoginCard.vue`
 - 当前调用方：`src/App.vue`
-- 品牌图片：`src/assets/logo.png`
+- 认证功能：`description/features/admin-authentication.md`
+- 认证接口：`description/api/auth/admin-authentication.md`
+- 品牌图片：`src/assets/logo.webp`
 - 用户数据说明：`description/db/user.md`
 
 > [!NOTE]
-> `user` 表只保存员工基础信息，不负责管理员登录账号、权限角色或密钥认证。
+> `user` 表只保存员工基础信息，不负责管理员登录账号、权限角色或密钥认证。当前准入采用独立的管理员密钥与短期令牌。

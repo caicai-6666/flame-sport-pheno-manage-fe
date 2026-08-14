@@ -1,18 +1,61 @@
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  getAllProjectLevels,
+  ProjectLevelListRequestError,
+} from '../../api/project-level/projectLevelListApi.js'
+import { ProjectRuleRequestError } from '../../api/project/projectRuleApi.js'
+import {
+  ProjectStatusUpdateRequestError,
+  updateProjectStatus,
+} from '../../api/project/projectStatusUpdateApi.js'
+import {
+  createProject,
+  ProjectCreateRequestError,
+} from '../../api/project/projectCreateApi.js'
+import {
+  ProjectRuleUpdateRequestError,
+  updateProjectRule,
+} from '../../api/project/projectRuleUpdateApi.js'
+import { createProjectRuleCatalog } from '../../services/projectRuleCatalog.js'
 import SportProjectCreateSheet from './SportProjectCreateSheet.vue'
 
-const levelPalettes = {
-  bronze: ['#a96948', '#f1d0b9'],
-  silver: ['#647682', '#dce6e9'],
-  gold: ['#a97822', '#f2d889'],
-}
+const props = defineProps({
+  projects: {
+    type: Array,
+    default: () => [],
+  },
+  loading: {
+    type: Boolean,
+    default: false,
+  },
+  error: {
+    type: String,
+    default: '',
+  },
+  projectRuleCatalog: {
+    type: Object,
+    default: null,
+  },
+  projectLevelCatalogRevision: {
+    type: Number,
+    default: 0,
+    validator: (value) => Number.isInteger(value) && value >= 0,
+  },
+})
 
-const challengeLevelOptions = [
-  { id: 1, name: '青铜', tone: 'bronze' },
-  { id: 2, name: '白银', tone: 'silver' },
-  { id: 3, name: '黄金', tone: 'gold' },
+const emit = defineEmits(['project-created', 'project-updated'])
+
+const levelPalettePool = [
+  ['#a96948', '#f1d0b9'],
+  ['#647682', '#dce6e9'],
+  ['#a97822', '#f2d889'],
+  ['#5578c6', '#dbe5f8'],
+  ['#7661b7', '#e4dcf7'],
+  ['#398f89', '#d8f0ea'],
 ]
+
+const RULE_UPDATE_CONFIRMATION_TIMEOUT_MS = 3000
 
 const localProjectPalettes = [
   ['#398f89', '#6bc7b6', '#245b57'],
@@ -24,7 +67,7 @@ const localProjectPalettes = [
 ]
 
 // 原型数据保持与 project、project_level、project_rule 三类实体的职责边界一致。
-const sportProjects = ref([
+const localSportProjectPrototypes = [
   {
     id: 1,
     name: '走路',
@@ -265,28 +308,260 @@ const sportProjects = ref([
       },
     ],
   },
-])
+]
+
+const sportProjects = ref([])
 
 const configurationRef = ref(null)
 const detailBackButtonRef = ref(null)
-const deleteConfirmButtonRef = ref(null)
 const selectedProject = ref(null)
 const detailExpanded = ref(false)
 const detailFlipped = ref(false)
 const detailLayerVisible = ref(false)
 const detailTransformStyle = ref({})
 const isCreateSheetOpen = ref(false)
-const deleteConfirmationVisible = ref(false)
-const pendingDeleteProjectId = ref(null)
-const isRuleValueEditing = ref(false)
-const ruleValueDraft = ref({})
-const ruleValueValidationMessage = ref('')
+const isCreateSheetPreparing = ref(false)
+const createSheetPreparationError = ref('')
+const isProjectCreating = ref(false)
+const projectCreateMessage = ref('')
+const editingRuleLevelId = ref(null)
+const ruleDraft = ref(null)
+const ruleUpdateMessage = ref('')
+const isRuleUpdateConfirmationActive = ref(false)
+const isRuleUpdating = ref(false)
+const isProjectStatusUpdating = ref(false)
+const projectStatusUpdateMessage = ref('')
+const editingRuleLevel = computed(() => (
+  selectedProject.value?.levels.find((level) => level.id === editingRuleLevelId.value) ?? null
+))
+const projectLevelListError = ref('')
+const localProjectRuleCatalog = props.projectRuleCatalog ? null : createProjectRuleCatalog()
+const projectRuleCatalog = props.projectRuleCatalog ?? localProjectRuleCatalog
 
-let nextLocalProjectId = Math.max(...sportProjects.value.map((project) => project.id)) + 1
+const projectLevels = ref([])
+const challengeLevelOptions = computed(() => projectLevels.value.map((level, index) => ({
+  ...level,
+  tone: ['bronze', 'silver', 'gold'][index] ?? 'custom',
+})))
+let projectLevelsLoaded = false
+let projectLevelListPromise = null
+let projectLevelListRequestController = null
+let projectLevelCatalogGeneration = 0
+const projectRuleRequestControllers = new Map()
+let projectRuleUpdateRequestController = null
+let projectStatusUpdateRequestController = null
+let projectCreateRequestController = null
+let ruleUpdateConfirmationTimerId = 0
 
 let closeRemoveTimerId = 0
 let focusTimerId = 0
 let motionPreference
+
+function formatRuleValue(value) {
+  if (value === null) return '待设置'
+  if (typeof value === 'string') return value
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
+}
+
+function createProjectConfigurationView(project) {
+  const prototype = localSportProjectPrototypes.find(
+    (candidate) => candidate.name === project.name,
+  )
+
+  return {
+    id: project.id,
+    name: project.name,
+    description: project.description ?? '',
+    status: project.status,
+    iconUrl: project.iconUrl,
+    iconDataUrl: project.iconObjectUrl ?? null,
+    iconLoadFailed: project.iconLoadFailed ?? false,
+    iconPaths: prototype?.iconPaths ?? [],
+    palette: prototype?.palette
+      ?? localProjectPalettes[(project.id - 1) % localProjectPalettes.length],
+    levels: [],
+    rulesLoading: false,
+    rulesLoaded: false,
+    rulesError: '',
+    uploadConfigs: [],
+  }
+}
+
+function createLevelRuleView(level, index) {
+  return {
+    id: level.id,
+    name: level.name,
+    reward: level.reward,
+    palette: levelPalettePool[index % levelPalettePool.length],
+    subDesc: null,
+    requirements: [],
+    ruleNote: null,
+    loading: true,
+    error: '',
+  }
+}
+
+async function getProjectLevelsOnDemand() {
+  // 空等级列表同样是有效结果，记录加载状态可避免每次打开项目都重复请求。
+  if (projectLevelsLoaded) return projectLevels.value
+  if (projectLevelListPromise) return projectLevelListPromise
+
+  const requestController = new AbortController()
+  projectLevelListRequestController = requestController
+  projectLevelListError.value = ''
+  const requestGeneration = projectLevelCatalogGeneration
+  const requestPromise = getAllProjectLevels({ signal: requestController.signal })
+    .then((levels) => {
+      if (requestGeneration !== projectLevelCatalogGeneration) return levels
+      projectLevels.value = levels
+      projectLevelsLoaded = true
+      return levels
+    })
+    .catch((error) => {
+      if (error?.name !== 'AbortError') {
+        projectLevelListError.value = error instanceof ProjectLevelListRequestError
+          ? error.message
+          : '挑战等级列表获取失败'
+      }
+      throw error
+    })
+    .finally(() => {
+      if (projectLevelListRequestController === requestController) {
+        projectLevelListRequestController = null
+      }
+      if (projectLevelListPromise === requestPromise) projectLevelListPromise = null
+    })
+  projectLevelListPromise = requestPromise
+
+  return projectLevelListPromise
+}
+
+async function loadSingleProjectRule(project, level) {
+  const requestKey = `${project.id}:${level.id}`
+  projectRuleRequestControllers.get(requestKey)?.abort()
+  const requestController = new AbortController()
+  projectRuleRequestControllers.set(requestKey, requestController)
+  level.loading = true
+  level.error = ''
+
+  try {
+    const rule = await projectRuleCatalog.load(project.id, level.id, {
+      signal: requestController.signal,
+    })
+    if (projectRuleRequestControllers.get(requestKey) !== requestController) return
+    level.subDesc = rule.subDesc
+    level.requirements = rule.metrics
+    level.ruleNote = rule.ruleNote
+  } catch (error) {
+    if (error?.name === 'AbortError') return
+    level.error = error instanceof ProjectRuleRequestError && error.status === 404
+      ? '该等级暂未配置规则'
+      : '规则加载失败，请重试'
+  } finally {
+    if (projectRuleRequestControllers.get(requestKey) === requestController) {
+      projectRuleRequestControllers.delete(requestKey)
+      level.loading = false
+    }
+  }
+}
+
+async function loadProjectRules(project) {
+  if (project.rulesLoaded || project.rulesLoading) return
+  const loadGeneration = projectLevelCatalogGeneration
+  project.rulesLoading = true
+  project.rulesError = ''
+
+  try {
+    const levels = await getProjectLevelsOnDemand()
+    if (loadGeneration !== projectLevelCatalogGeneration) return
+    project.levels = levels.map(createLevelRuleView)
+    let nextLevelIndex = 0
+    async function runWorker() {
+      while (nextLevelIndex < project.levels.length) {
+        const level = project.levels[nextLevelIndex]
+        nextLevelIndex += 1
+        await loadSingleProjectRule(project, level)
+      }
+    }
+    // 等级数量可能继续增长，固定最多 5 个并发避免打开项目时产生请求尖峰。
+    await Promise.all(
+      Array.from({ length: Math.min(5, project.levels.length) }, runWorker),
+    )
+    if (loadGeneration !== projectLevelCatalogGeneration) return
+    project.rulesLoaded = true
+  } catch (error) {
+    if (error?.name !== 'AbortError') {
+      project.rulesError = projectLevelListError.value || '项目规则暂时无法获取'
+    }
+  } finally {
+    // 旧快照请求结束时不能覆盖新一轮加载状态。
+    if (loadGeneration === projectLevelCatalogGeneration) project.rulesLoading = false
+  }
+}
+
+function invalidateProjectLevelSnapshot() {
+  if (editingRuleLevelId.value !== null) resetRuleEditor()
+  projectLevelCatalogGeneration += 1
+  projectLevelListRequestController?.abort()
+  projectLevelListRequestController = null
+  projectLevelListPromise = null
+  projectLevels.value = []
+  projectLevelsLoaded = false
+  projectLevelListError.value = ''
+
+  // 创建等级会为全部项目写入新规则；保留组合缓存，但让项目在下次打开时补查新组合。
+  sportProjects.value.forEach((project) => {
+    project.levels = []
+    project.rulesLoading = false
+    project.rulesLoaded = false
+    project.rulesError = ''
+  })
+}
+
+function retryProjectRules() {
+  if (!selectedProject.value) return
+  selectedProject.value.rulesLoaded = false
+  void loadProjectRules(selectedProject.value)
+}
+
+watch(
+  () => props.projects,
+  (projects) => {
+    const existingProjectById = new Map(
+      sportProjects.value.map((project) => [project.id, project]),
+    )
+    const serverProjects = projects.map((project) => {
+      const nextProject = createProjectConfigurationView(project)
+      const existingProject = existingProjectById.get(project.id)
+      if (!existingProject) return nextProject
+
+      // 图标会渐进写回共享目录，更新基础字段时保留已按需取得的规则状态。
+      Object.assign(existingProject, {
+        id: nextProject.id,
+        name: nextProject.name,
+        description: nextProject.description,
+        status: nextProject.status,
+        iconUrl: nextProject.iconUrl,
+        iconDataUrl: nextProject.iconDataUrl,
+        iconLoadFailed: nextProject.iconLoadFailed,
+        iconPaths: nextProject.iconPaths,
+        palette: nextProject.palette,
+      })
+      return existingProject
+    })
+    sportProjects.value = serverProjects
+  },
+  { immediate: true, deep: true },
+)
+
+watch(
+  () => props.projectLevelCatalogRevision,
+  (revision, previousRevision) => {
+    if (revision === previousRevision) return
+    invalidateProjectLevelSnapshot()
+  },
+)
 
 function clearDetailTimers() {
   window.clearTimeout(closeRemoveTimerId)
@@ -294,14 +569,16 @@ function clearDetailTimers() {
 }
 
 async function openProjectDetail(project, event) {
-  if (selectedProject.value || isCreateSheetOpen.value || !configurationRef.value) return
+  if (
+    selectedProject.value
+    || isCreateSheetOpen.value
+    || isCreateSheetPreparing.value
+    || !configurationRef.value
+  ) return
 
   clearDetailTimers()
-  deleteConfirmationVisible.value = false
-  pendingDeleteProjectId.value = null
-  isRuleValueEditing.value = false
-  ruleValueDraft.value = {}
-  ruleValueValidationMessage.value = ''
+  projectStatusUpdateMessage.value = ''
+  resetRuleEditor()
 
   const rootRect = configurationRef.value.getBoundingClientRect()
   const sourceRect = event.currentTarget.getBoundingClientRect()
@@ -323,6 +600,8 @@ async function openProjectDetail(project, event) {
   }
 
   selectedProject.value = project
+  // 规则只在管理员真正打开项目时加载，未打开项目不产生等级或规则请求。
+  void loadProjectRules(project)
   await nextTick()
 
   if (motionPreference?.matches) {
@@ -344,144 +623,268 @@ async function openProjectDetail(project, event) {
   })
 }
 
-async function startRuleValueEditing() {
-  if (!selectedProject.value) return
+function clearRuleUpdateConfirmation() {
+  window.clearTimeout(ruleUpdateConfirmationTimerId)
+  ruleUpdateConfirmationTimerId = 0
+  isRuleUpdateConfirmationActive.value = false
+}
 
-  // 草稿按“等级 ID + 指标顺序”隔离，取消编辑时不会污染当前已展示的规则值。
-  ruleValueDraft.value = Object.fromEntries(
-    selectedProject.value.levels.map((level) => [
-      level.id,
-      level.requirements.map((requirement) => requirement.value),
-    ]),
-  )
-  ruleValueValidationMessage.value = ''
-  isRuleValueEditing.value = true
+function resetRuleEditor() {
+  clearRuleUpdateConfirmation()
+  editingRuleLevelId.value = null
+  ruleDraft.value = null
+  ruleUpdateMessage.value = ''
+}
 
+function serializeRuleDraftValue(value) {
+  // null 没有可供推断的具体类型，以文本框承接首次配置；留空仍保存为 null。
+  if (value === null) return { type: 'nullable-string', text: '' }
+  if (typeof value === 'string') return { type: 'string', text: value }
+  if (typeof value === 'number') return { type: 'number', text: String(value) }
+  if (typeof value === 'boolean') return { type: 'boolean', text: String(value) }
+  return { type: 'json', text: JSON.stringify(value, null, 2) }
+}
+
+function parseRuleDraftMetric(metric) {
+  if (metric.type === 'nullable-string') return metric.text === '' ? null : metric.text
+  if (metric.type === 'string') return metric.text
+  if (metric.type === 'number') {
+    const value = Number(metric.text)
+    if (!metric.text.trim() || !Number.isFinite(value)) throw new Error(`${metric.label}需要有效数字`)
+    return value
+  }
+  if (metric.type === 'boolean') return metric.text === 'true'
+  try {
+    return JSON.parse(metric.text)
+  } catch {
+    throw new Error(`${metric.label}需要合法 JSON`)
+  }
+}
+
+async function startRuleEditing(level) {
+  if (!selectedProject.value || level.loading || level.error || isRuleUpdating.value) return
+  editingRuleLevelId.value = level.id
+  ruleDraft.value = {
+    subDesc: level.subDesc ?? '',
+    ruleNote: level.ruleNote ?? '',
+    metrics: level.requirements.map((requirement) => ({
+      label: requirement.label,
+      ...serializeRuleDraftValue(requirement.value),
+    })),
+  }
+  ruleUpdateMessage.value = ''
   await nextTick()
-  const firstInput = configurationRef.value?.querySelector('.project-level-rule__value-input')
-  firstInput?.focus()
-  firstInput?.select()
+  configurationRef.value
+    ?.querySelector('.project-level-rule-editor__sub-desc')
+    ?.focus()
 }
 
-function cancelRuleValueEditing() {
-  isRuleValueEditing.value = false
-  ruleValueDraft.value = {}
-  ruleValueValidationMessage.value = ''
+function cancelRuleEditing() {
+  if (isRuleUpdating.value) return
+  resetRuleEditor()
 }
 
-function saveRuleValues() {
-  if (!selectedProject.value) return
+function handleRuleDraftInput() {
+  clearRuleUpdateConfirmation()
+  ruleUpdateMessage.value = ''
+}
 
-  const hasEmptyValue = selectedProject.value.levels.some((level) =>
-    level.requirements.some(
-      (_, index) => !String(ruleValueDraft.value[level.id]?.[index] ?? '').trim(),
-    ),
-  )
-  if (hasEmptyValue) {
-    ruleValueValidationMessage.value = '指标要求值不能为空'
+async function submitRuleUpdate(level) {
+  if (!selectedProject.value || !ruleDraft.value || isRuleUpdating.value) return
+  let ruleContent
+  try {
+    ruleContent = ruleDraft.value.metrics.map((metric) => ({
+      label: metric.label,
+      value: parseRuleDraftMetric(metric),
+    }))
+  } catch (error) {
+    clearRuleUpdateConfirmation()
+    ruleUpdateMessage.value = error.message
     return
   }
 
-  // 仅更新 rule_content 中的 value，指标名称与数组顺序保持不变。
-  selectedProject.value.levels.forEach((level) => {
-    level.requirements = level.requirements.map((requirement, index) => ({
-      ...requirement,
-      value: String(ruleValueDraft.value[level.id][index]).trim(),
-    }))
-  })
-  cancelRuleValueEditing()
+  if (ruleDraft.value.subDesc.trim().length > 128 || ruleDraft.value.ruleNote.trim().length > 255) {
+    clearRuleUpdateConfirmation()
+    ruleUpdateMessage.value = '副标题最多 128 字，规则备注最多 255 字'
+    return
+  }
+
+  if (!isRuleUpdateConfirmationActive.value) {
+    isRuleUpdateConfirmationActive.value = true
+    ruleUpdateConfirmationTimerId = window.setTimeout(
+      clearRuleUpdateConfirmation,
+      RULE_UPDATE_CONFIRMATION_TIMEOUT_MS,
+    )
+    return
+  }
+
+  clearRuleUpdateConfirmation()
+
+  const requestController = new AbortController()
+  projectRuleUpdateRequestController = requestController
+  isRuleUpdating.value = true
+  ruleUpdateMessage.value = ''
+
+  try {
+    const updatedRule = await updateProjectRule(level.id, selectedProject.value.id, {
+      ...(ruleContent.length ? { ruleContent } : {}),
+      subDesc: ruleDraft.value.subDesc,
+      ruleNote: ruleDraft.value.ruleNote,
+    }, { signal: requestController.signal })
+    if (projectRuleUpdateRequestController !== requestController) return
+
+    const model = projectRuleCatalog.set(updatedRule.projectId, updatedRule.levelId, updatedRule)
+    level.subDesc = model.subDesc
+    level.requirements = model.metrics
+    level.ruleNote = model.ruleNote
+    isRuleUpdating.value = false
+    projectRuleUpdateRequestController = null
+    resetRuleEditor()
+  } catch (error) {
+    if (error?.name === 'AbortError') return
+    ruleUpdateMessage.value = error instanceof ProjectRuleUpdateRequestError
+      ? error.message
+      : '项目等级配置修改失败，请稍后重试'
+  } finally {
+    if (projectRuleUpdateRequestController === requestController) {
+      projectRuleUpdateRequestController = null
+      isRuleUpdating.value = false
+    }
+  }
 }
 
-function toggleProjectVisibility() {
-  if (!selectedProject.value) return
+async function toggleProjectVisibility() {
+  if (!selectedProject.value || isProjectStatusUpdating.value) return
+  const project = selectedProject.value
+  const nextStatus = project.status === 0 ? 1 : 0
+  projectStatusUpdateMessage.value = ''
 
-  // 原型阶段用 project.status 表示客户端是否展示；管理端仍保留卡片以支持恢复显示。
-  selectedProject.value.status = selectedProject.value.status === 0 ? 1 : 0
+  const requestController = new AbortController()
+  projectStatusUpdateRequestController = requestController
+  isProjectStatusUpdating.value = true
+  try {
+    const updatedProject = await updateProjectStatus(project.id, nextStatus, {
+      signal: requestController.signal,
+    })
+    if (projectStatusUpdateRequestController !== requestController) return
+    Object.assign(project, updatedProject)
+    emit('project-updated', updatedProject)
+  } catch (error) {
+    if (error?.name === 'AbortError') return
+    projectStatusUpdateMessage.value = error instanceof ProjectStatusUpdateRequestError
+      ? error.message
+      : '项目可见状态修改失败，请稍后重试'
+  } finally {
+    if (projectStatusUpdateRequestController === requestController) {
+      projectStatusUpdateRequestController = null
+      isProjectStatusUpdating.value = false
+    }
+  }
 }
 
-async function requestProjectDeletion() {
-  if (!selectedProject.value) return
+async function openCreateSheet() {
+  if (
+    selectedProject.value
+    || props.loading
+    || props.error
+    || isCreateSheetPreparing.value
+  ) return
 
-  deleteConfirmationVisible.value = true
-  await nextTick()
-  deleteConfirmButtonRef.value?.focus()
-}
+  isCreateSheetPreparing.value = true
+  createSheetPreparationError.value = ''
+  try {
+    await getProjectLevelsOnDemand()
+    if (!projectLevelsLoaded) return
+    const levels = projectLevels.value
+    if (!levels.length) {
+      createSheetPreparationError.value = '请先创建至少一个挑战等级'
+      return
+    }
 
-function cancelProjectDeletion() {
-  deleteConfirmationVisible.value = false
-}
-
-function removePendingProject() {
-  if (pendingDeleteProjectId.value === null) return
-
-  sportProjects.value = sportProjects.value.filter(
-    (project) => project.id !== pendingDeleteProjectId.value,
-  )
-  pendingDeleteProjectId.value = null
-}
-
-function confirmProjectDeletion() {
-  if (!selectedProject.value) return
-
-  // 后续接入接口时应先完成赛季、凭证及历史引用校验，本轮仅删除本地原型数据。
-  pendingDeleteProjectId.value = selectedProject.value.id
-  deleteConfirmationVisible.value = false
-  closeProjectDetail()
-}
-
-function openCreateSheet() {
-  if (selectedProject.value) return
-  isCreateSheetOpen.value = true
+    // 新建表单只在完整等级目录就绪后挂载，使初始化时即可为每个等级建立必填规则草稿。
+    isCreateSheetOpen.value = true
+  } catch (error) {
+    if (error?.name === 'AbortError') return
+    createSheetPreparationError.value = projectLevelListError.value || '挑战等级加载失败，请重试'
+  } finally {
+    isCreateSheetPreparing.value = false
+  }
 }
 
 function closeCreateSheet() {
+  if (isProjectCreating.value) return
   isCreateSheetOpen.value = false
+  projectCreateMessage.value = ''
 }
 
-function createSportProject(payload) {
-  const localId = nextLocalProjectId++
-  const levelRuleMap = new Map(payload.levelRules.map((rule) => [rule.levelId, rule]))
+function clearProjectCreateMessage() {
+  projectCreateMessage.value = ''
+}
 
-  const newProject = {
-    id: localId,
-    name: payload.name,
-    description: payload.description,
-    status: payload.status,
-    iconDataUrl: payload.iconDataUrl,
-    iconFileName: payload.iconFileName,
-    palette: localProjectPalettes[(localId - 1) % localProjectPalettes.length],
-    levels: challengeLevelOptions.map((level) => {
-      const rule = levelRuleMap.get(level.id)
+async function createSportProject(payload) {
+  if (isProjectCreating.value) return
 
-      return {
-        ...level,
-        subDesc: rule?.subDesc ?? '',
-        ruleNote: rule?.ruleNote ?? '',
-        status: rule?.status ?? 1,
-        requirements: rule?.ruleContent ?? [],
-      }
-    }),
-    uploadConfigs: payload.uploadConfigs,
+  projectCreateRequestController?.abort()
+  const requestController = new AbortController()
+  projectCreateRequestController = requestController
+  isProjectCreating.value = true
+  projectCreateMessage.value = ''
+
+  try {
+    const createdProject = await createProject(payload, { signal: requestController.signal })
+    if (projectCreateRequestController !== requestController) return
+
+    const levelRuleMap = new Map(payload.project_rules.map((rule) => [rule.level_id, rule]))
+    const newProject = {
+      ...createProjectConfigurationView(createdProject),
+      rulesLoading: false,
+      rulesLoaded: true,
+      rulesError: '',
+      levels: challengeLevelOptions.value.map((level, index) => {
+        const rule = levelRuleMap.get(level.id)
+
+        return {
+          ...level,
+          palette: levelPalettePool[index % levelPalettePool.length],
+          subDesc: rule?.sub_desc ?? '',
+          ruleNote: rule?.rule_note ?? '',
+          status: rule?.status ?? 1,
+          requirements: rule?.rule_content ?? [],
+        }
+      }),
+      uploadConfigs: payload.project_upload_configs,
+    }
+
+    // 先保留本次已填写的规则视图，再把服务端主键和图标交给工作台共享目录建模。
+    sportProjects.value = [newProject, ...sportProjects.value]
+    emit('project-created', { project: createdProject, iconFile: payload.icon_file })
+    isCreateSheetOpen.value = false
+    projectCreateMessage.value = ''
+  } catch (error) {
+    if (error?.name === 'AbortError' || error?.name === 'AdminAuthenticationRequiredError') return
+    projectCreateMessage.value = error instanceof ProjectCreateRequestError
+      ? error.message
+      : '运动项目创建失败，请稍后重试'
+  } finally {
+    if (projectCreateRequestController === requestController) {
+      projectCreateRequestController = null
+      isProjectCreating.value = false
+    }
   }
-
-  // 新增入口始终保持第一位，新建项目插入现有项目之前，便于立即确认创建结果。
-  sportProjects.value = [newProject, ...sportProjects.value]
-  closeCreateSheet()
 }
 
 function closeProjectDetail() {
-  if (!selectedProject.value) return
+  // 写请求返回前保持当前编辑上下文，避免服务端成功后找不到待更新的等级卡片。
+  if (!selectedProject.value || isRuleUpdating.value || isProjectStatusUpdating.value) return
 
   clearDetailTimers()
-  deleteConfirmationVisible.value = false
-  cancelRuleValueEditing()
+  resetRuleEditor()
 
   if (motionPreference?.matches) {
     selectedProject.value = null
     detailExpanded.value = false
     detailFlipped.value = false
     detailLayerVisible.value = false
-    removePendingProject()
     return
   }
 
@@ -491,7 +894,6 @@ function closeProjectDetail() {
   detailLayerVisible.value = false
   closeRemoveTimerId = window.setTimeout(() => {
     selectedProject.value = null
-    removePendingProject()
   }, 820)
 }
 
@@ -499,13 +901,8 @@ function handleGlobalKeydown(event) {
   if (event.key !== 'Escape') return
 
   if (selectedProject.value) {
-    if (deleteConfirmationVisible.value) {
-      cancelProjectDeletion()
-      return
-    }
-
-    if (isRuleValueEditing.value) {
-      cancelRuleValueEditing()
+    if (editingRuleLevelId.value !== null) {
+      cancelRuleEditing()
       return
     }
 
@@ -521,8 +918,23 @@ onMounted(() => {
   window.addEventListener('keydown', handleGlobalKeydown)
 })
 
+onActivated(() => {
+  // 若切换去创建等级时项目详情仍保持打开，回到本页后才补取新增等级规则。
+  if (selectedProject.value && !selectedProject.value.rulesLoaded) {
+    void loadProjectRules(selectedProject.value)
+  }
+})
+
 onBeforeUnmount(() => {
   clearDetailTimers()
+  clearRuleUpdateConfirmation()
+  projectLevelListRequestController?.abort()
+  projectCreateRequestController?.abort()
+  projectRuleUpdateRequestController?.abort()
+  projectStatusUpdateRequestController?.abort()
+  projectRuleRequestControllers.forEach((controller) => controller.abort())
+  projectRuleRequestControllers.clear()
+  localProjectRuleCatalog?.clear()
   window.removeEventListener('keydown', handleGlobalKeydown)
 })
 </script>
@@ -531,17 +943,22 @@ onBeforeUnmount(() => {
   <section ref="configurationRef" class="sport-project-configuration" aria-label="全部运动项目">
     <div
       class="sport-project-configuration__scroll"
-      :inert="Boolean(selectedProject) || isCreateSheetOpen"
+      :inert="Boolean(selectedProject) || isCreateSheetOpen || isCreateSheetPreparing"
     >
       <header class="sport-project-configuration__header">
         <h2>全部项目</h2>
-        <span>{{ sportProjects.length }} 个项目</span>
+        <span v-if="loading">正在同步</span>
+        <span v-else-if="error">同步失败</span>
+        <span v-else>{{ sportProjects.length }} 个项目</span>
       </header>
 
       <div class="sport-project-configuration__grid">
         <button
           type="button"
           class="sport-project-create-card"
+          :class="{ 'is-preparing': isCreateSheetPreparing }"
+          :disabled="loading || Boolean(error) || isCreateSheetPreparing"
+          :aria-busy="isCreateSheetPreparing"
           aria-label="新建运动项目"
           @click="openCreateSheet"
         >
@@ -550,7 +967,10 @@ onBeforeUnmount(() => {
               <path d="M12 5v14M5 12h14" />
             </svg>
           </span>
-          <strong>新建运动项目</strong>
+          <strong>{{ isCreateSheetPreparing ? '正在加载挑战等级' : '新建运动项目' }}</strong>
+          <small v-if="createSheetPreparationError" role="alert">
+            {{ createSheetPreparationError }}
+          </small>
         </button>
 
         <button
@@ -574,18 +994,23 @@ onBeforeUnmount(() => {
         >
           <span class="sport-project-card__icon" aria-hidden="true">
             <img v-if="project.iconDataUrl" :src="project.iconDataUrl" alt="" />
-            <svg v-else viewBox="0 0 48 48">
+            <svg v-else-if="project.iconPaths.length" viewBox="0 0 48 48">
               <path v-for="path in project.iconPaths" :key="path" :d="path" />
             </svg>
+            <strong v-else>{{ project.name.slice(0, 1) }}</strong>
           </span>
 
           <span class="sport-project-card__copy">
             <strong>{{ project.name }}</strong>
-            <small>{{ project.description }}</small>
+            <small>{{ project.description || '暂无项目说明' }}</small>
           </span>
 
           <span class="sport-project-card__meta">
-            <span>{{ project.levels.length }} 个等级</span>
+            <span v-if="project.rulesLoading">规则加载中</span>
+            <span v-else-if="project.rulesLoaded">
+              {{ project.levels.length }} 个等级
+            </span>
+            <span v-else>查看等级规则</span>
             <small v-if="project.status === 0">已隐藏</small>
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <path d="m9 6 6 6-6 6" />
@@ -621,16 +1046,21 @@ onBeforeUnmount(() => {
           >
             <span class="sport-project-card__icon" aria-hidden="true">
               <img v-if="selectedProject.iconDataUrl" :src="selectedProject.iconDataUrl" alt="" />
-              <svg v-else viewBox="0 0 48 48">
+              <svg v-else-if="selectedProject.iconPaths.length" viewBox="0 0 48 48">
                 <path v-for="path in selectedProject.iconPaths" :key="path" :d="path" />
               </svg>
+              <strong v-else>{{ selectedProject.name.slice(0, 1) }}</strong>
             </span>
             <span class="sport-project-card__copy">
               <strong>{{ selectedProject.name }}</strong>
-              <small>{{ selectedProject.description }}</small>
+              <small>{{ selectedProject.description || '暂无项目说明' }}</small>
             </span>
             <span class="sport-project-card__meta">
-              <span>{{ selectedProject.levels.length }} 个等级</span>
+              <span v-if="selectedProject.rulesLoading">规则加载中</span>
+              <span v-else-if="selectedProject.rulesLoaded">
+                {{ selectedProject.levels.length }} 个等级
+              </span>
+              <span v-else>查看等级规则</span>
             </span>
           </section>
 
@@ -639,7 +1069,10 @@ onBeforeUnmount(() => {
             :aria-hidden="!detailFlipped"
             :inert="!detailFlipped"
           >
-            <header class="sport-project-detail-card__header" :inert="deleteConfirmationVisible">
+            <header
+              class="sport-project-detail-card__header"
+              :inert="isRuleUpdating || isProjectStatusUpdating"
+            >
               <button
                 ref="detailBackButtonRef"
                 type="button"
@@ -655,9 +1088,10 @@ onBeforeUnmount(() => {
               <div class="sport-project-detail-card__title">
                 <span class="sport-project-detail-card__mini-icon" aria-hidden="true">
                   <img v-if="selectedProject.iconDataUrl" :src="selectedProject.iconDataUrl" alt="" />
-                  <svg v-else viewBox="0 0 48 48">
+                  <svg v-else-if="selectedProject.iconPaths.length" viewBox="0 0 48 48">
                     <path v-for="path in selectedProject.iconPaths" :key="path" :d="path" />
                   </svg>
+                  <strong v-else>{{ selectedProject.name.slice(0, 1) }}</strong>
                 </span>
                 <div>
                   <h3>{{ selectedProject.name }}</h3>
@@ -666,33 +1100,11 @@ onBeforeUnmount(() => {
               </div>
 
               <div class="sport-project-detail-card__actions">
-                <template v-if="isRuleValueEditing">
-                  <button type="button" @click="cancelRuleValueEditing">
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="m7 7 10 10M17 7 7 17" />
-                    </svg>
-                    <span>取消修改</span>
-                  </button>
-
-                  <button type="button" class="is-save" @click="saveRuleValues">
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="m5 12 4 4L19 6" />
-                    </svg>
-                    <span>保存指标</span>
-                  </button>
-                </template>
-
-                <template v-else>
-                  <button type="button" class="is-edit" @click="startRuleValueEditing">
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="m4 20 4.3-1 10.9-10.9a2.1 2.1 0 0 0-3-3L5.3 16 4 20zM14.8 6.5l2.7 2.7" />
-                    </svg>
-                    <span>修改指标</span>
-                  </button>
-
+                <template v-if="editingRuleLevelId === null">
                   <button
                     type="button"
                     :class="{ 'is-restore': selectedProject.status === 0 }"
+                    :disabled="isProjectStatusUpdating"
                     @click="toggleProjectVisibility"
                   >
                     <svg v-if="selectedProject.status === 0" viewBox="0 0 24 24" aria-hidden="true">
@@ -702,106 +1114,261 @@ onBeforeUnmount(() => {
                     <svg v-else viewBox="0 0 24 24" aria-hidden="true">
                       <path d="M3 12s3.4-5 9-5c2.1 0 3.9.7 5.3 1.6M21 12s-3.4 5-9 5c-2.1 0-3.9-.7-5.3-1.6M4 4l16 16" />
                     </svg>
-                    <span>{{ selectedProject.status === 0 ? '恢复显示' : '隐藏项目' }}</span>
-                  </button>
-
-                  <button type="button" class="is-danger" @click="requestProjectDeletion">
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" />
-                    </svg>
-                    <span>删除项目</span>
+                    <span>
+                      {{ isProjectStatusUpdating ? '更新中' : selectedProject.status === 0 ? '恢复显示' : '隐藏项目' }}
+                    </span>
                   </button>
                 </template>
+                <span v-else class="sport-project-detail-card__editing-hint">
+                  正在修改单个等级
+                </span>
               </div>
             </header>
 
-            <Transition name="rule-value-error">
-              <p
-                v-if="ruleValueValidationMessage"
-                class="sport-project-detail-card__validation"
-                role="alert"
-              >
-                {{ ruleValueValidationMessage }}
-              </p>
-            </Transition>
+            <p
+              v-if="projectStatusUpdateMessage"
+              class="sport-project-detail-card__status-error"
+              role="alert"
+            >
+              {{ projectStatusUpdateMessage }}
+            </p>
 
             <div
               class="sport-project-detail-card__rules"
-              :class="{ 'is-editing': isRuleValueEditing }"
-              :inert="deleteConfirmationVisible"
+              :inert="editingRuleLevelId !== null"
             >
+              <div
+                v-if="selectedProject.rulesLoading && !selectedProject.levels.length"
+                class="sport-project-rules-state"
+                role="status"
+              >
+                <span class="sport-project-rules-state__spinner" aria-hidden="true"></span>
+                <strong>正在获取各等级规则</strong>
+                <small>只会加载当前打开的项目</small>
+              </div>
+
+              <div
+                v-else-if="selectedProject.rulesError"
+                class="sport-project-rules-state is-error"
+                role="alert"
+              >
+                <strong>{{ selectedProject.rulesError }}</strong>
+                <button type="button" @click="retryProjectRules">重新加载</button>
+              </div>
+
+              <div
+                v-else-if="selectedProject.rulesLoaded && !selectedProject.levels.length"
+                class="sport-project-rules-state"
+                role="status"
+              >
+                <strong>暂无挑战等级</strong>
+                <small>创建挑战等级后可继续配置项目规则</small>
+              </div>
+
               <article
                 v-for="level in selectedProject.levels"
                 :key="level.id"
                 class="project-level-rule"
-                :class="{ 'is-disabled': level.status === 0 }"
+                :data-level-rule-id="level.id"
                 :style="{
-                  '--level-primary': levelPalettes[level.tone][0],
-                  '--level-soft': levelPalettes[level.tone][1],
+                  '--level-primary': level.palette[0],
+                  '--level-soft': level.palette[1],
                 }"
               >
-                <header class="project-level-rule__header">
-                  <span aria-hidden="true"></span>
-                  <h4>{{ level.name }}</h4>
-                  <small>挑战等级</small>
-                </header>
-
-                <p v-if="level.subDesc" class="project-level-rule__description">
-                  {{ level.subDesc }}
-                </p>
-
-                <dl class="project-level-rule__list">
-                  <div
-                    v-for="(requirement, requirementIndex) in level.requirements"
-                    :key="requirement.label"
+                <div class="project-level-rule__inner">
+                  <section
+                    class="project-level-rule__face project-level-rule__front"
                   >
-                    <dt>{{ requirement.label }}</dt>
-                    <span aria-hidden="true">—</span>
-                    <dd v-if="!isRuleValueEditing">{{ requirement.value }}</dd>
-                    <dd v-else>
-                      <input
-                        v-model="ruleValueDraft[level.id][requirementIndex]"
-                        class="project-level-rule__value-input"
-                        type="text"
-                        maxlength="64"
-                        :aria-label="`${level.name}${requirement.label}要求值`"
-                        @input="ruleValueValidationMessage = ''"
-                      />
-                    </dd>
-                  </div>
-                </dl>
+                    <header class="project-level-rule__header">
+                      <span aria-hidden="true"></span>
+                      <h4>{{ level.name }}</h4>
+                      <small>挑战等级</small>
+                      <button
+                        v-if="!level.loading && !level.error && level.requirements.length && editingRuleLevelId === null"
+                        type="button"
+                        :aria-label="`修订${level.name}挑战指标值`"
+                        @click="startRuleEditing(level)"
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="m4 20 4.3-1 10.9-10.9a2.1 2.1 0 0 0-3-3L5.3 16 4 20zM14.8 6.5l2.7 2.7" />
+                        </svg>
+                        修订
+                      </button>
+                    </header>
 
-                <footer v-if="level.ruleNote" class="project-level-rule__note">
-                  {{ level.ruleNote }}
-                </footer>
+                    <div v-if="level.loading" class="project-level-rule__state" role="status">
+                      <span aria-hidden="true"></span>
+                      <small>规则加载中</small>
+                    </div>
+
+                    <div v-else-if="level.error" class="project-level-rule__state is-error">
+                      <small>{{ level.error }}</small>
+                      <button
+                        v-if="level.error !== '该等级暂未配置规则'"
+                        type="button"
+                        @click="loadSingleProjectRule(selectedProject, level)"
+                      >重试</button>
+                    </div>
+
+                    <template v-else>
+                      <p class="project-level-rule__description">
+                        {{ level.subDesc || '暂未配置挑战副描述' }}
+                      </p>
+
+                      <dl class="project-level-rule__list">
+                        <div
+                          v-for="requirement in level.requirements"
+                          :key="requirement.label"
+                        >
+                          <dt>{{ requirement.label }}</dt>
+                          <span aria-hidden="true">—</span>
+                          <dd
+                            :class="{ 'is-pending': requirement.value === null }"
+                          >{{ formatRuleValue(requirement.value) }}</dd>
+                        </div>
+                      </dl>
+
+                      <footer class="project-level-rule__note">
+                        <small>规则备注</small>
+                        <span>{{ level.ruleNote || '暂未配置规则备注' }}</span>
+                      </footer>
+                    </template>
+                  </section>
+
+                </div>
               </article>
             </div>
 
-            <Transition name="project-delete-confirm">
-              <section
-                v-if="deleteConfirmationVisible"
-                class="project-delete-confirm"
-                role="alertdialog"
-                aria-modal="true"
-                :aria-label="`确认删除${selectedProject.name}`"
+            <Transition name="project-rule-editor-layer">
+              <div
+                v-if="editingRuleLevel && ruleDraft"
+                class="project-level-rule-editor-layer"
+                @click.self="cancelRuleEditing"
               >
-                <span class="project-delete-confirm__icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24">
-                    <path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" />
-                  </svg>
-                </span>
-                <div>
-                  <h4>删除“{{ selectedProject.name }}”？</h4>
-                  <p>当前原型会直接移除该项目，赛季和历史数据引用校验将在后续接入。</p>
-                </div>
-                <footer>
-                  <button type="button" @click="cancelProjectDeletion">暂不删除</button>
-                  <button ref="deleteConfirmButtonRef" type="button" @click="confirmProjectDeletion">
-                    确认删除
-                  </button>
-                </footer>
-              </section>
+                <form
+                  class="project-level-rule__editor"
+                  role="dialog"
+                  aria-modal="true"
+                  :aria-label="`修改${editingRuleLevel.name}项目规则`"
+                  :aria-busy="isRuleUpdating"
+                  :style="{
+                    '--level-primary': editingRuleLevel.palette[0],
+                    '--level-soft': editingRuleLevel.palette[1],
+                  }"
+                  @submit.prevent="submitRuleUpdate(editingRuleLevel)"
+                >
+                  <header class="project-level-rule-editor__header">
+                    <div>
+                      <small>单等级配置</small>
+                      <h4>{{ editingRuleLevel.name }}</h4>
+                    </div>
+                    <button type="button" :disabled="isRuleUpdating" @click="cancelRuleEditing">
+                      取消
+                    </button>
+                  </header>
+
+                  <div class="project-level-rule-editor__body">
+                    <div class="project-level-rule-editor__copy">
+                      <label class="project-level-rule-editor__text-field">
+                        <span>挑战副标题</span>
+                        <input
+                          v-model="ruleDraft.subDesc"
+                          class="project-level-rule-editor__sub-desc"
+                          type="text"
+                          maxlength="128"
+                          :disabled="isRuleUpdating"
+                          placeholder="留空表示清除"
+                          @input="handleRuleDraftInput"
+                        />
+                      </label>
+
+                      <label class="project-level-rule-editor__text-field">
+                        <span>规则备注</span>
+                        <textarea
+                          v-model="ruleDraft.ruleNote"
+                          maxlength="255"
+                          rows="3"
+                          :disabled="isRuleUpdating"
+                          placeholder="留空表示清除"
+                          @input="handleRuleDraftInput"
+                        ></textarea>
+                      </label>
+                    </div>
+
+                    <fieldset class="project-level-rule-editor__metrics">
+                      <legend>修订指标值</legend>
+                      <div class="project-level-rule-editor__metric-list">
+                        <div
+                          v-for="metric in ruleDraft.metrics"
+                          :key="metric.label"
+                          class="project-level-rule-editor__metric"
+                        >
+                          <strong>{{ metric.label }}</strong>
+                          <span class="project-level-rule-editor__type">
+                            {{ metric.type === 'nullable-string' ? '待设置' : metric.type === 'json' ? 'JSON' : metric.type === 'boolean' ? '布尔' : metric.type === 'number' ? '数字' : '文本' }}
+                          </span>
+                          <select
+                            v-if="metric.type === 'boolean'"
+                            v-model="metric.text"
+                            :disabled="isRuleUpdating"
+                            :aria-label="`${metric.label}要求值`"
+                            @change="handleRuleDraftInput"
+                          >
+                            <option value="true">true</option>
+                            <option value="false">false</option>
+                          </select>
+                          <textarea
+                            v-else-if="metric.type === 'json'"
+                            v-model="metric.text"
+                            :disabled="isRuleUpdating"
+                            :aria-label="`${metric.label}JSON 要求值`"
+                            rows="2"
+                            @input="handleRuleDraftInput"
+                          ></textarea>
+                          <input
+                            v-else
+                            v-model="metric.text"
+                            :type="metric.type === 'number' ? 'number' : 'text'"
+                            :step="metric.type === 'number' ? 'any' : undefined"
+                            :disabled="isRuleUpdating"
+                            :aria-label="`${metric.label}要求值`"
+                            @input="handleRuleDraftInput"
+                          />
+                        </div>
+                      </div>
+                    </fieldset>
+                  </div>
+
+                  <footer class="project-level-rule-editor__footer">
+                    <p
+                      v-if="ruleUpdateMessage || isRuleUpdating || isRuleUpdateConfirmationActive"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      {{
+                        ruleUpdateMessage
+                          || (isRuleUpdating
+                            ? '正在保存配置…'
+                            : '请在 3 秒内再次确认')
+                      }}
+                    </p>
+                    <button
+                      type="submit"
+                      :class="{
+                        'is-confirming': isRuleUpdateConfirmationActive,
+                        'is-updating': isRuleUpdating,
+                      }"
+                      :disabled="isRuleUpdating"
+                      :aria-pressed="isRuleUpdateConfirmationActive"
+                    >
+                      {{ isRuleUpdating ? '保存中' : isRuleUpdateConfirmationActive ? '确认保存' : '保存配置' }}
+                      <span v-if="isRuleUpdateConfirmationActive" aria-hidden="true"></span>
+                    </button>
+                  </footer>
+                </form>
+              </div>
             </Transition>
+
           </section>
         </div>
       </article>
@@ -812,7 +1379,10 @@ onBeforeUnmount(() => {
         v-if="isCreateSheetOpen"
         :existing-names="sportProjects.map((project) => project.name)"
         :levels="challengeLevelOptions"
+        :submitting="isProjectCreating"
+        :submit-error="projectCreateMessage"
         @cancel="closeCreateSheet"
+        @clear-error="clearProjectCreateMessage"
         @submit="createSportProject"
       />
     </Transition>
@@ -932,6 +1502,29 @@ onBeforeUnmount(() => {
   letter-spacing: 0.01em;
 }
 
+.sport-project-create-card > small {
+  max-width: 190px;
+  color: #a2613f;
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.sport-project-create-card.is-preparing .sport-project-create-card__plus {
+  animation: sport-project-create-loading 900ms ease-in-out infinite alternate;
+}
+
+@keyframes sport-project-create-loading {
+  to {
+    color: #d97736;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 90%),
+      0 0 0 8px rgb(217 119 54 / 8%),
+      0 15px 30px rgb(52 112 95 / 13%);
+    transform: scale(1.06);
+  }
+}
+
 .sport-project-create-card:focus-visible {
   outline: 3px solid rgb(61 145 122 / 28%);
   outline-offset: 3px;
@@ -1012,6 +1605,12 @@ onBeforeUnmount(() => {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 2.1;
+}
+
+.sport-project-card__icon > strong {
+  font-size: 25px;
+  font-weight: 820;
+  text-shadow: 0 4px 12px rgb(22 43 34 / 20%);
 }
 
 .sport-project-card__icon img {
@@ -1179,6 +1778,10 @@ onBeforeUnmount(() => {
   height: 62px;
 }
 
+.sport-project-detail-card__front .sport-project-card__icon > strong {
+  font-size: 34px;
+}
+
 .sport-project-detail-card__front .sport-project-card__copy strong {
   font-size: clamp(30px, 4vw, 42px);
 }
@@ -1276,6 +1879,11 @@ onBeforeUnmount(() => {
   width: 29px;
   height: 29px;
   object-fit: contain;
+}
+
+.sport-project-detail-card__mini-icon > strong {
+  font-size: 17px;
+  font-weight: 810;
 }
 
 .sport-project-detail-card__title h3 {
@@ -1376,59 +1984,122 @@ onBeforeUnmount(() => {
   outline-offset: 2px;
 }
 
-.sport-project-detail-card__validation {
+.sport-project-detail-card__actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.sport-project-detail-card__editing-hint {
+  display: inline-flex;
+  min-height: 34px;
+  padding: 0 13px;
+  color: color-mix(in srgb, var(--project-primary) 78%, #34443b);
+  font-size: 11px;
+  font-weight: 760;
+  background: color-mix(in srgb, var(--project-primary) 9%, white);
+  border: 1px solid color-mix(in srgb, var(--project-primary) 14%, white);
+  border-radius: 999px;
+  align-items: center;
+}
+
+.sport-project-detail-card__status-error {
   position: absolute;
-  z-index: 4;
-  top: 78px;
+  z-index: 3;
+  top: 73px;
   right: clamp(21px, 2.4vw, 30px);
+  max-width: min(420px, calc(100% - 42px));
   margin: 0;
-  padding: 7px 11px;
-  color: #a84f45;
+  padding: 8px 12px;
+  color: #a45147;
   font-size: 10px;
   font-weight: 700;
-  background: rgb(255 244 241 / 92%);
-  border: 1px solid rgb(183 78 64 / 12%);
+  background: rgb(255 244 241 / 94%);
+  border: 1px solid rgb(183 78 64 / 13%);
   border-radius: 999px;
-  box-shadow: 0 8px 18px rgb(117 67 58 / 9%);
-}
-
-.rule-value-error-enter-active,
-.rule-value-error-leave-active {
-  transition:
-    opacity 240ms ease,
-    transform 300ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.rule-value-error-enter-from,
-.rule-value-error-leave-to {
-  opacity: 0;
-  transform: translateY(-5px) scale(0.97);
+  box-shadow: 0 9px 20px rgb(117 67 58 / 10%);
 }
 
 .sport-project-detail-card__rules {
   display: grid;
   min-height: 0;
   margin-top: 20px;
-  padding: 3px 3px 8px;
-  gap: clamp(12px, 1.4vw, 18px);
+  padding: 3px 3px 24px;
   overflow: auto;
   overscroll-behavior: contain;
+  align-items: start;
+  column-gap: clamp(12px, 1.4vw, 18px);
+  row-gap: clamp(26px, 2.5vw, 34px);
+  grid-auto-rows: max-content;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   scrollbar-color: color-mix(in srgb, var(--project-primary) 25%, transparent) transparent;
   scrollbar-width: thin;
 }
 
-.sport-project-detail-card__rules.is-editing .project-level-rule {
-  border-color: color-mix(in srgb, var(--level-primary) 24%, white);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 90%),
-    0 15px 32px color-mix(in srgb, var(--level-primary) 13%, transparent);
+.sport-project-rules-state {
+  display: grid;
+  min-height: 260px;
+  padding: 28px;
+  color: #69766f;
+  text-align: center;
+  background: rgb(255 255 255 / 58%);
+  border: 1px solid rgb(255 255 255 / 80%);
+  border-radius: 22px;
+  gap: 8px;
+  grid-column: 1 / -1;
+  place-content: center;
+}
+
+.sport-project-rules-state strong {
+  color: #405048;
+  font-size: 14px;
+}
+
+.sport-project-rules-state small {
+  font-size: 11px;
+}
+
+.sport-project-rules-state button,
+.project-level-rule__state button {
+  min-height: 32px;
+  margin: 4px auto 0;
+  padding: 0 13px;
+  color: var(--project-primary);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 720;
+  background: color-mix(in srgb, var(--project-primary) 9%, white);
+  border: 1px solid color-mix(in srgb, var(--project-primary) 16%, white);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.sport-project-rules-state__spinner {
+  width: 28px;
+  height: 28px;
+  margin: 0 auto 3px;
+  border: 2px solid color-mix(in srgb, var(--project-primary) 14%, transparent);
+  border-top-color: var(--project-primary);
+  border-radius: 50%;
+  animation: sport-project-rule-loading 760ms linear infinite;
 }
 
 .project-level-rule {
   position: relative;
   min-width: 0;
-  min-height: 260px;
+  min-height: 300px;
+  align-self: start;
+}
+
+.project-level-rule__inner {
+  display: grid;
+  min-height: 300px;
+}
+
+.project-level-rule__face {
+  position: relative;
+  grid-area: 1 / 1;
+  min-width: 0;
+  min-height: 300px;
   padding: clamp(17px, 2vw, 23px);
   overflow: hidden;
   background:
@@ -1439,9 +2110,12 @@ onBeforeUnmount(() => {
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 88%),
     0 12px 28px color-mix(in srgb, var(--level-primary) 9%, transparent);
+  transition:
+    border-color 380ms ease,
+    box-shadow 440ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.project-level-rule::after {
+.project-level-rule__face::after {
   position: absolute;
   right: -28px;
   bottom: -38px;
@@ -1467,7 +2141,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 9px;
   border-bottom: 1px solid color-mix(in srgb, var(--level-primary) 12%, transparent);
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto 1fr auto;
 }
 
 .project-level-rule__header > span {
@@ -1493,22 +2167,92 @@ onBeforeUnmount(() => {
   grid-column: 2;
 }
 
+.project-level-rule__header button {
+  display: flex;
+  min-height: 31px;
+  padding: 0 9px 0 11px;
+  color: color-mix(in srgb, var(--level-primary) 76%, #405048);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 740;
+  background: color-mix(in srgb, var(--level-primary) 8%, white);
+  border: 1px solid color-mix(in srgb, var(--level-primary) 14%, white);
+  border-radius: 999px;
+  cursor: pointer;
+  grid-column: 3;
+  grid-row: 1 / 3;
+  align-items: center;
+  gap: 2px;
+  transition:
+    background-color 300ms ease,
+    transform 360ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.project-level-rule__header button svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
 .project-level-rule__description {
   position: relative;
   z-index: 1;
   margin: 13px 0 0;
+  padding-bottom: 11px;
   color: #69756e;
   font-size: 11px;
   font-weight: 620;
-  line-height: 1.45;
+  line-height: 1.5;
+  border-bottom: 1px dashed color-mix(in srgb, var(--level-primary) 12%, transparent);
+  overflow-wrap: anywhere;
+}
+
+.project-level-rule__state {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  min-height: 136px;
+  color: #7b8780;
+  text-align: center;
+  gap: 9px;
+  place-content: center;
+}
+
+.project-level-rule__state > span {
+  width: 23px;
+  height: 23px;
+  margin: 0 auto;
+  border: 2px solid color-mix(in srgb, var(--level-primary) 14%, transparent);
+  border-top-color: var(--level-primary);
+  border-radius: 50%;
+  animation: sport-project-rule-loading 760ms linear infinite;
+}
+
+.project-level-rule__state small {
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.project-level-rule__state.is-error small {
+  color: #a25c53;
+}
+
+@keyframes sport-project-rule-loading {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .project-level-rule__list {
   position: relative;
   z-index: 1;
   display: grid;
-  margin: 19px 0 0;
-  gap: 13px;
+  margin: 13px 0 0;
+  gap: 10px;
 }
 
 .project-level-rule__list > div {
@@ -1527,7 +2271,7 @@ onBeforeUnmount(() => {
 .project-level-rule__note {
   position: relative;
   z-index: 1;
-  margin-top: 17px;
+  margin-top: 14px;
   padding: 9px 10px;
   color: #77827c;
   font-size: 10px;
@@ -1536,6 +2280,18 @@ onBeforeUnmount(() => {
   background: rgb(255 255 255 / 48%);
   border: 1px solid rgb(77 96 86 / 7%);
   border-radius: 10px;
+}
+
+.project-level-rule__note small {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--level-primary);
+  font-size: 9px;
+  font-weight: 760;
+}
+
+.project-level-rule__note span {
+  overflow-wrap: anywhere;
 }
 
 .project-level-rule__list dt {
@@ -1558,142 +2314,340 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
 }
 
-.project-level-rule__value-input {
-  width: 100%;
-  min-width: 0;
-  height: 34px;
-  padding: 0 9px;
-  color: #303c35;
-  font: inherit;
+.project-level-rule__list dd.is-pending {
+  color: color-mix(in srgb, var(--level-primary) 58%, #7c8881);
   font-size: 12px;
-  font-weight: 740;
-  background: rgb(255 255 255 / 78%);
-  border: 1px solid color-mix(in srgb, var(--level-primary) 18%, white);
-  border-radius: 9px;
-  outline: none;
-  box-shadow: inset 0 1px 4px rgb(47 65 55 / 4%);
-  user-select: text;
-  transition:
-    border-color 300ms ease,
-    box-shadow 340ms ease;
+  font-weight: 680;
 }
 
-.project-level-rule__value-input:focus {
-  border-color: color-mix(in srgb, var(--level-primary) 48%, white);
+.project-level-rule__editor {
+  display: grid;
+  width: min(760px, calc(100% - 42px));
+  max-height: calc(100% - 42px);
+  min-width: 0;
+  min-height: min(350px, calc(100% - 42px));
+  padding: clamp(17px, 2vw, 23px);
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 95% 0%, color-mix(in srgb, var(--level-soft) 66%, transparent), transparent 43%),
+    linear-gradient(145deg, rgb(255 255 255 / 97%), rgb(246 249 247 / 94%));
+  border: 1px solid color-mix(in srgb, var(--level-primary) 22%, white);
+  border-radius: 22px;
   box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--level-primary) 9%, transparent),
-    inset 0 1px 4px rgb(47 65 55 / 3%);
+    inset 0 1px 0 rgb(255 255 255 / 92%),
+    0 18px 36px color-mix(in srgb, var(--level-primary) 14%, transparent);
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
-.project-delete-confirm {
+.project-level-rule-editor-layer {
   position: absolute;
-  z-index: 5;
+  z-index: 4;
   inset: 0;
   display: grid;
-  padding: clamp(30px, 6vw, 72px);
-  align-content: center;
-  justify-content: center;
-  gap: 17px;
-  background: rgb(244 248 245 / 86%);
-  -webkit-backdrop-filter: blur(17px) saturate(90%);
-  backdrop-filter: blur(17px) saturate(90%);
-  grid-template-columns: auto minmax(0, 430px);
-}
-
-.project-delete-confirm__icon {
-  display: grid;
-  width: 58px;
-  height: 58px;
-  color: #b15d51;
-  background: rgb(190 87 71 / 9%);
-  border: 1px solid rgb(181 82 67 / 11%);
-  border-radius: 20px;
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 72%),
-    0 12px 26px rgb(100 61 54 / 9%);
+  padding: 18px;
+  background: rgb(238 244 240 / 58%);
+  -webkit-backdrop-filter: blur(8px) saturate(90%);
+  backdrop-filter: blur(8px) saturate(90%);
   place-items: center;
 }
 
-.project-delete-confirm__icon svg {
-  width: 27px;
-  height: 27px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.65;
+.project-rule-editor-layer-enter-active,
+.project-rule-editor-layer-leave-active {
+  transition:
+    opacity 260ms ease,
+    -webkit-backdrop-filter 320ms ease,
+    backdrop-filter 320ms ease;
 }
 
-.project-delete-confirm > div {
-  align-self: center;
+.project-rule-editor-layer-enter-active .project-level-rule__editor,
+.project-rule-editor-layer-leave-active .project-level-rule__editor {
+  transition:
+    opacity 240ms ease,
+    transform 380ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.project-delete-confirm h4 {
-  margin: 0 0 7px;
-  color: #3b4540;
-  font-size: clamp(19px, 2.2vw, 25px);
-  font-weight: 790;
-  letter-spacing: -0.025em;
+.project-rule-editor-layer-enter-from,
+.project-rule-editor-layer-leave-to,
+.project-rule-editor-layer-enter-from .project-level-rule__editor,
+.project-rule-editor-layer-leave-to .project-level-rule__editor {
+  opacity: 0;
 }
 
-.project-delete-confirm p {
-  margin: 0;
-  color: #77827c;
-  font-size: 11px;
-  font-weight: 620;
-  line-height: 1.55;
+.project-rule-editor-layer-enter-from .project-level-rule__editor,
+.project-rule-editor-layer-leave-to .project-level-rule__editor {
+  transform: translateY(18px) scale(0.96);
 }
 
-.project-delete-confirm footer {
+.project-level-rule-editor__header,
+.project-level-rule-editor__footer {
   display: flex;
-  justify-content: flex-end;
-  gap: 9px;
-  grid-column: 2;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
 }
 
-.project-delete-confirm footer button {
-  height: 39px;
-  padding: 0 16px;
-  color: #66736c;
+.project-level-rule-editor__header {
+  padding-bottom: 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--level-primary) 12%, transparent);
+}
+
+.project-level-rule-editor__header small {
+  display: block;
+  margin-bottom: 1px;
+  color: var(--level-primary);
+  font-size: 9px;
+  font-weight: 760;
+}
+
+.project-level-rule-editor__header h4 {
+  margin: 0;
+  color: color-mix(in srgb, var(--level-primary) 76%, #28352e);
+  font-size: 20px;
+  font-weight: 820;
+}
+
+.project-level-rule-editor__header button {
+  min-height: 31px;
+  padding: 0 12px;
+  color: #718078;
   font: inherit;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 720;
-  background: rgb(255 255 255 / 70%);
-  border: 1px solid rgb(76 95 85 / 10%);
+  background: rgb(255 255 255 / 62%);
+  border: 1px solid rgb(64 83 73 / 10%);
   border-radius: 999px;
   cursor: pointer;
+}
+
+.project-level-rule-editor__body {
+  display: grid;
+  min-height: 0;
+  padding: 15px 2px;
+  overflow: auto;
+  align-items: stretch;
+  gap: 12px 18px;
+  grid-template-columns: minmax(180px, 0.72fr) minmax(300px, 1.45fr);
+  scrollbar-width: thin;
+}
+
+.project-level-rule-editor__copy {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  padding: 12px;
+  align-content: stretch;
+  gap: 11px;
+  background: rgb(255 255 255 / 55%);
+  border: 1px solid color-mix(in srgb, var(--level-primary) 10%, white);
+  border-radius: 14px;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.project-level-rule-editor__text-field {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  gap: 6px;
+  grid-template-rows: auto minmax(36px, 1fr);
+}
+
+.project-level-rule-editor__text-field:first-child {
+  grid-template-rows: auto 36px;
+}
+
+.project-level-rule-editor__text-field > span,
+.project-level-rule-editor__metrics legend {
+  padding: 0;
+  color: #64736b;
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.project-level-rule-editor__metrics {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  padding: 12px;
+  gap: 7px;
+  align-content: stretch;
+  background: rgb(255 255 255 / 55%);
+  border: 1px solid color-mix(in srgb, var(--level-primary) 10%, white);
+  border-radius: 14px;
+  grid-column: 2;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.project-level-rule-editor__metric-list {
+  display: grid;
+  min-height: 0;
+  padding-right: 4px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  align-content: start;
+  gap: 8px;
+  scrollbar-color: color-mix(in srgb, var(--level-primary) 28%, transparent) transparent;
+  scrollbar-width: thin;
+}
+
+.project-level-rule-editor__metric {
+  display: grid;
+  min-width: 0;
+  min-height: 42px;
+  padding: 7px 8px 7px 11px;
+  align-items: center;
+  gap: 8px;
+  background: rgb(255 255 255 / 62%);
+  border: 1px solid color-mix(in srgb, var(--level-primary) 10%, white);
+  border-radius: 12px;
+  grid-template-columns: minmax(74px, 0.75fr) 74px minmax(120px, 1.35fr);
+}
+
+.project-level-rule-editor__metric strong {
+  min-width: 0;
+  color: #445149;
+  font-size: 11px;
+  font-weight: 740;
+  overflow-wrap: anywhere;
+}
+
+.project-level-rule-editor__metric > span {
+  color: #89948e;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.project-level-rule-editor__metric > .project-level-rule-editor__type {
+  display: inline-flex;
+  min-height: 27px;
+  padding: 0 8px;
+  justify-self: start;
+  align-items: center;
+  color: color-mix(in srgb, var(--level-primary) 72%, #5f6d65);
+  background: color-mix(in srgb, var(--level-primary) 7%, white);
+  border-radius: 999px;
+}
+
+.project-level-rule-editor__text-field input,
+.project-level-rule-editor__text-field textarea,
+.project-level-rule-editor__metric input,
+.project-level-rule-editor__metric textarea,
+.project-level-rule-editor__metric select {
+  width: 100%;
+  min-width: 0;
+  color: #344139;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 650;
+  background: rgb(255 255 255 / 79%);
+  border: 1px solid color-mix(in srgb, var(--level-primary) 14%, white);
+  border-radius: 9px;
+  outline: none;
+  box-sizing: border-box;
   transition:
-    box-shadow 400ms ease,
-    transform 400ms cubic-bezier(0.16, 1, 0.3, 1);
+    border-color 260ms ease,
+    box-shadow 320ms ease;
 }
 
-.project-delete-confirm footer button:last-child {
-  color: #fff7f5;
-  background: linear-gradient(145deg, #c4695d, #a94e45);
-  border-color: rgb(255 255 255 / 14%);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 17%),
-    0 9px 20px rgb(140 66 57 / 20%);
+.project-level-rule-editor__text-field input,
+.project-level-rule-editor__metric input,
+.project-level-rule-editor__metric select {
+  height: 36px;
+  padding: 0 9px;
 }
 
-.project-delete-confirm footer button:focus-visible {
-  outline: 3px solid rgb(180 79 65 / 22%);
-  outline-offset: 3px;
+.project-level-rule-editor__text-field textarea,
+.project-level-rule-editor__metric textarea {
+  min-height: 55px;
+  padding: 8px 9px;
+  line-height: 1.45;
+  resize: vertical;
 }
 
-.project-delete-confirm-enter-active,
-.project-delete-confirm-leave-active {
+.project-level-rule-editor__text-field textarea {
+  height: 100%;
+  resize: none;
+}
+
+.project-level-rule-editor__metric textarea {
+  min-height: 43px;
+  resize: vertical;
+}
+
+.project-level-rule-editor__text-field input:focus,
+.project-level-rule-editor__text-field textarea:focus,
+.project-level-rule-editor__metric input:focus,
+.project-level-rule-editor__metric textarea:focus,
+.project-level-rule-editor__metric select:focus {
+  border-color: color-mix(in srgb, var(--level-primary) 48%, white);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--level-primary) 8%, transparent);
+}
+
+.project-level-rule-editor__footer {
+  min-height: 43px;
+  padding-top: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--level-primary) 12%, transparent);
+}
+
+.project-level-rule-editor__footer p {
+  min-width: 0;
+  margin: 0;
+  color: #7b8780;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.project-level-rule-editor__footer > button {
+  position: relative;
+  min-width: 94px;
+  min-height: 35px;
+  /* 提示文案按状态挂载，按钮始终靠右可避免二次确认时横向跳位。 */
+  margin-left: auto;
+  padding: 0 14px;
+  overflow: hidden;
+  color: #f7fcf9;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 780;
+  background: linear-gradient(145deg, var(--level-primary), color-mix(in srgb, var(--level-primary) 76%, #274b3e));
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 999px;
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--level-primary) 20%, transparent);
+  cursor: pointer;
   transition:
-    opacity 300ms ease,
-    -webkit-backdrop-filter 380ms ease,
-    backdrop-filter 380ms ease;
+    min-width 360ms cubic-bezier(0.16, 1, 0.3, 1),
+    background 320ms ease,
+    transform 340ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.project-delete-confirm-enter-from,
-.project-delete-confirm-leave-to {
-  opacity: 0;
-  -webkit-backdrop-filter: blur(0) saturate(100%);
-  backdrop-filter: blur(0) saturate(100%);
+.project-level-rule-editor__footer > button.is-confirming {
+  min-width: 108px;
+  background: linear-gradient(145deg, #d5844b, #b85d44);
+}
+
+.project-level-rule-editor__footer > button > span {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: rgb(255 255 255 / 72%);
+  transform-origin: left;
+  animation: project-rule-confirmation-countdown 3s linear forwards;
+}
+
+.project-level-rule-editor__footer button:disabled,
+.project-level-rule-editor__header button:disabled,
+.project-level-rule-editor__metric :disabled,
+.project-level-rule-editor__text-field :disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+@keyframes project-rule-confirmation-countdown {
+  to {
+    transform: scaleX(0);
+  }
 }
 
 @keyframes sport-project-card-enter {
@@ -1705,6 +2659,16 @@ onBeforeUnmount(() => {
 }
 
 @media (hover: hover) {
+  .project-level-rule__header button:hover {
+    background: color-mix(in srgb, var(--level-primary) 12%, white);
+    transform: translateY(-1px);
+  }
+
+  .project-level-rule-editor__footer > button:hover,
+  .project-level-rule-editor__header button:hover {
+    transform: translateY(-1px);
+  }
+
   .sport-project-create-card:hover {
     color: #356f60;
     background:
@@ -1756,8 +2720,7 @@ onBeforeUnmount(() => {
     transform: translateX(-3px);
   }
 
-  .sport-project-detail-card__actions button:hover,
-  .project-delete-confirm footer button:hover {
+  .sport-project-detail-card__actions button:hover {
     box-shadow: 0 10px 20px rgb(48 68 58 / 11%);
     transform: translateY(-2px);
   }
@@ -1797,36 +2760,59 @@ onBeforeUnmount(() => {
     justify-self: end;
   }
 
-  .sport-project-detail-card__validation {
-    top: 120px;
-    right: 16px;
-  }
-
   .sport-project-detail-card__rules {
     grid-template-columns: minmax(220px, 1fr);
+  }
+
+  .project-level-rule-editor__body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .project-level-rule-editor__metrics {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .project-level-rule-editor__metric-list {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .project-level-rule-editor__metric {
+    grid-template-columns: minmax(72px, 0.8fr) 70px minmax(110px, 1.3fr);
   }
 
   .project-level-rule {
     min-height: 220px;
   }
 
-  .project-delete-confirm {
-    padding: 28px 22px;
-    text-align: center;
-    grid-template-columns: 1fr;
-  }
-
-  .project-delete-confirm__icon {
-    justify-self: center;
-  }
-
-  .project-delete-confirm footer {
-    justify-content: center;
-    grid-column: 1;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .sport-project-rules-state__spinner,
+  .project-level-rule__state > span {
+    animation: none;
+  }
+
+  .project-level-rule__inner,
+  .project-level-rule__face,
+  .project-level-rule__header button,
+  .project-level-rule-editor__footer > button,
+  .project-level-rule-editor__header button {
+    transition: none;
+  }
+
+  .project-level-rule-editor__footer > button > span {
+    animation: none;
+  }
+
+  .project-rule-editor-layer-enter-active,
+  .project-rule-editor-layer-leave-active,
+  .project-rule-editor-layer-enter-active .project-level-rule__editor,
+  .project-rule-editor-layer-leave-active .project-level-rule__editor {
+    transition: none;
+  }
+
   .sport-project-card,
   .sport-project-create-card {
     opacity: 1;
@@ -1848,12 +2834,7 @@ onBeforeUnmount(() => {
   .sport-project-detail-card__inner,
   .sport-project-detail-card__header > button,
   .sport-project-detail-card__header > button svg,
-  .sport-project-detail-card__actions button,
-  .project-level-rule__value-input,
-  .rule-value-error-enter-active,
-  .rule-value-error-leave-active,
-  .project-delete-confirm,
-  .project-delete-confirm footer button {
+  .sport-project-detail-card__actions button {
     transition: none;
   }
 }

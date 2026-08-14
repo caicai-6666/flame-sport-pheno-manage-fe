@@ -61,6 +61,7 @@ description/
 
 当前已建立：
 
+- [`architecture/development-reverse-proxy.md`](architecture/development-reverse-proxy.md)：管理端开发与生产模式的请求路径，以及开发服务的 Nginx 转发约定。
 - [`architecture/page-zoom-guard.md`](architecture/page-zoom-guard.md)：管理端页面缩放限制及浏览器边界。
 - [`architecture/page-scroll-boundary.md`](architecture/page-scroll-boundary.md)：根页面锁定与内部业务容器的滚动边界。
 
@@ -74,6 +75,8 @@ description/
 
 | 建议文档 | 内容范围 | 状态 |
 | --- | --- | --- |
+| [`features/admin-authentication.md`](features/admin-authentication.md) | 管理密钥登录、令牌会话恢复与失效处理 | `已建立` |
+| [`features/dashboard.md`](features/dashboard.md) | 当前赛季卡片、正式参赛等级统计与看板异常状态 | `已建立` |
 | [`features/season-management.md`](features/season-management.md) | 赛季列表、新增、编辑和状态管理 | `原型版` |
 | [`features/challenge-management.md`](features/challenge-management.md) | 项目、挑战等级、规则和上传配置 | `原型版` |
 | [`features/platform-configuration.md`](features/platform-configuration.md) | 平台配置入口、页面切换与模块范围 | `原型版` |
@@ -98,19 +101,19 @@ description/
 - [`components/configuration/ChallengeLevelCreateSheet.md`](components/configuration/ChallengeLevelCreateSheet.md)：从等级容器底部升起的新增挑战等级表单。
 - [`components/configuration/SportProjectConfiguration.md`](components/configuration/SportProjectConfiguration.md)：运动项目卡片及放大翻转后的各等级规则概览。
 - [`components/configuration/SportProjectCreateSheet.md`](components/configuration/SportProjectCreateSheet.md)：项目资料、等级规则与凭证上传配置组成的三步新建表单。
-- [`components/configuration/RewardConfiguration.md`](components/configuration/RewardConfiguration.md)：按积分升序展示并支持翻面编辑、隐藏和删除的奖品配置卡片。
+- [`components/configuration/RewardConfiguration.md`](components/configuration/RewardConfiguration.md)：按积分升序展示并支持翻面编辑与上下架的奖品配置卡片。
 - [`components/configuration/RewardCreateSheet.md`](components/configuration/RewardCreateSheet.md)：采集商品名称、描述、积分和图片的新增商品表单。
 - [`components/configuration/SeasonBasicConfiguration.md`](components/configuration/SeasonBasicConfiguration.md)：当前赛季与历史赛季的卡片式概览。
 - [`components/configuration/SeasonCreateSheet.md`](components/configuration/SeasonCreateSheet.md)：从赛季容器底部升起的新建赛季表单。
-- [`components/configuration/SeasonProjectEnrollmentChart.md`](components/configuration/SeasonProjectEnrollmentChart.md)：赛季背面的各运动项目参与人数横向柱状图。
+- [`components/configuration/SeasonProjectEnrollmentChart.md`](components/configuration/SeasonProjectEnrollmentChart.md)：预留的赛季各运动项目参与人数横向柱状图，当前未挂载。
 - [`components/configuration/WheelPickerColumn.md`](components/configuration/WheelPickerColumn.md)：日期与项目个数共用的单列滚轮选择器。
 - [`components/dashboard/ChallengeLevelEnrollmentCard.md`](components/dashboard/ChallengeLevelEnrollmentCard.md)：可翻转的挑战等级报名与人员名单卡片。
 - [`components/dashboard/ChallengeLevelPieChart.md`](components/dashboard/ChallengeLevelPieChart.md)：挑战等级报名人数饼状图。
 - [`components/dashboard/EnrollmentFlipCard.md`](components/dashboard/EnrollmentFlipCard.md)：等级与项目报名卡片共用的翻转及人员名单容器。
 - [`components/dashboard/ProjectEnrollmentCard.md`](components/dashboard/ProjectEnrollmentCard.md)：可翻转的项目报名与人员名单卡片。
 - [`components/dashboard/ProjectEnrollmentBarChart.md`](components/dashboard/ProjectEnrollmentBarChart.md)：运动项目报名人数横向柱状图。
-- [`components/dashboard/SeasonProofReviewDeck.md`](components/dashboard/SeasonProofReviewDeck.md)：当前赛季卡片背面的待审列表与单条凭证终审工作区。
-- [`components/dashboard/SeasonTaskListPanel.md`](components/dashboard/SeasonTaskListPanel.md)：当前赛季卡片背面的通用待办列表。
+- [`components/dashboard/SeasonProofReviewDeck.md`](components/dashboard/SeasonProofReviewDeck.md)：数据看板独立聚焦框中的待审列表与单条凭证终审工作区。
+- [`components/dashboard/SeasonTaskListPanel.md`](components/dashboard/SeasonTaskListPanel.md)：数据看板独立聚焦框中的通用待办列表。
 - [`components/layout/MainWorkspaceShell.md`](components/layout/MainWorkspaceShell.md)：登录后的悬浮式管理工作台外壳。
 - [`components/layout/WorkspaceModuleLayout.md`](components/layout/WorkspaceModuleLayout.md)：平台配置与用户事务共用的左栏模块页面骨架。
 - [`components/user-affairs/UserAffairsPage.md`](components/user-affairs/UserAffairsPage.md)：积分发放、运动记录和兑换记录的用户事务页面骨架。
@@ -127,6 +130,35 @@ description/
 
 > [!WARNING]
 > 不得根据数据库字段猜测接口地址、请求方式或响应结构。后端契约不明确时，应标记为“待确认”。
+
+当前已建立：
+
+- [`api/auth/admin-authentication.md`](api/auth/admin-authentication.md)：管理员密钥换取令牌与缓存会话校验接口。
+- [`api/dashboard/current-season.md`](api/dashboard/current-season.md)：数据看板获取当前激活赛季与正式参赛人员的统计接口。
+- [`api/dashboard/project-participants.md`](api/dashboard/project-participants.md)：按当前赛季参赛记录与项目查询有效报名及完成进度，并在前端聚合展示。
+- [`api/season/season-list.md`](api/season/season-list.md)：平台配置获取按开始日期倒序排列的全部赛季基本信息。
+- [`api/season/season-create.md`](api/season/season-create.md)：校验日期与可见项目容量并创建未开始赛季。
+- [`api/proof/pending-final-review.md`](api/proof/pending-final-review.md)：按赛季参赛记录获取初审通过的有效凭证，并聚合为待终审队列。
+- [`api/proof/final-review.md`](api/proof/final-review.md)：提交凭证终审决定，并处理默认评语、进度结果与异常状态。
+- [`api/project/project-list.md`](api/project/project-list.md)：获取按 ID 稳定排序的全部项目，并由各业务视图按状态筛选。
+- [`api/project/project-create.md`](api/project/project-create.md)：使用三段 JSON 字符串与处理后的 WebP 文件事务创建运动项目、全部等级规则和上传配置。
+- [`api/project/project-level-list.md`](api/project/project-level-list.md)：平台配置获取按奖励积分与主键升序排列的全部挑战等级。
+- [`api/project/project-level-create.md`](api/project/project-level-create.md)：二次确认后创建启用状态的挑战等级，并处理名称冲突。
+- [`api/project/project-level-reward-update.md`](api/project/project-level-reward-update.md)：二次确认后修改等级奖励积分，并由后端统一校验配置窗口。
+- [`api/project/project-rule.md`](api/project/project-rule.md)：按项目与挑战等级获取有序规则指标，并在待终审详情中按需复用。
+- [`api/project/project-rule-update.md`](api/project/project-rule-update.md)：二次确认后按既有指标标签修改单个项目、单个等级的完整规则配置。
+- [`api/project/project-status-update.md`](api/project/project-status-update.md)：修改项目可见状态，并同步看板项目口径与赛季创建容量。
+- [`api/product/product-list.md`](api/product/product-list.md)：获取包含上下架状态的全部奖品，并受控加载商品图片。
+- [`api/product/product-create.md`](api/product/product-create.md)：二次确认后通过 multipart 创建默认上架奖品并上传 WebP 图片。
+- [`api/product/product-status-update.md`](api/product/product-status-update.md)：按商品列表状态渲染奖品卡片，并安全提交上架或下架变更。
+- [`api/product/product-update.md`](api/product/product-update.md)：按变化字段局部修改奖品资料，并处理图片替换的部分成功语义。
+- [`api/product/reward-delivery.md`](api/product/reward-delivery.md)：查询待发放兑换流水，复用用户目录并受控补齐历史奖品信息。
+- [`api/user/user-info.md`](api/user/user-info.md)：按正式参赛用户 ID 批量查询姓名、部门和头像的只读接口。
+- [`api/image/avatar.md`](api/image/avatar.md)：通过管理端后端安全中转用户头像二进制，并限制并发与自动重试。
+- [`api/image/project-icon.md`](api/image/project-icon.md)：通过管理端后端安全中转项目图标，并渐进加载到项目报名图表。
+- [`api/image/proof-record.md`](api/image/proof-record.md)：通过凭证 ID 安全中转运动凭证图片，并按审核进度分批预取。
+- [`api/suggestion/suggestion-list.md`](api/suggestion/suggestion-list.md)：获取可见用户意见，并渐进加载提交用户头像。
+- [`api/suggestion/suggestion-process.md`](api/suggestion/suggestion-process.md)：将可见用户意见标记为已优化或拒绝，并处理幂等、冲突与提交状态。
 
 ### 数据库文档
 
@@ -150,7 +182,7 @@ description/
 
 - [`season.md`](db/season.md)：赛季表。
 - [`project.md`](db/project.md)：运动项目表。
-- [`project_level.md`](db/project_level.md)：挑战等级表。
+- [`project-level.md`](db/project-level.md)：挑战等级表。
 - [`project_rule.md`](db/project_rule.md)：项目等级规则表。
 - [`project_upload_config.md`](db/project_upload_config.md)：项目上传配置表。
 - [`season_user.md`](db/season_user.md)：用户赛季参与表。

@@ -1,5 +1,7 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+
+const CREATE_CONFIRMATION_TIMEOUT_MS = 3000
 
 const props = defineProps({
   existingNames: {
@@ -10,27 +12,38 @@ const props = defineProps({
     type: Array,
     required: true,
   },
+  submitting: {
+    type: Boolean,
+    default: false,
+  },
+  submitError: {
+    type: String,
+    default: '',
+  },
 })
 
-const emit = defineEmits(['cancel', 'submit'])
+const emit = defineEmits(['cancel', 'clear-error', 'submit'])
 
 const projectName = ref('')
 const projectDescription = ref('')
-const projectStatus = ref(true)
 const iconDataUrl = ref('')
+const iconFile = ref(null)
 const iconFileName = ref('')
+const iconFileSize = ref(0)
+const isIconProcessing = ref(false)
 const validationMessage = ref('')
+const isCreateConfirmationActive = ref(false)
 const nameInputRef = ref(null)
 const iconInputRef = ref(null)
 const activeStep = ref(0)
 
 const formSteps = [
-  { id: 'project', label: '项目资料', description: 'project' },
-  { id: 'rule', label: '等级规则', description: 'project_rule' },
-  { id: 'upload', label: '上传配置', description: 'project_upload_config' },
+  { id: 'project', label: '项目资料' },
+  { id: 'rule', label: '等级规则' },
+  { id: 'upload', label: '上传配置' },
 ]
 const stepHints = [
-  '项目创建后默认启用，后续仍可停用',
+  '新项目默认隐藏，完成全部配置后可在项目卡片中恢复显示',
   '每个启用等级会生成一条对应的项目规则',
   '凭证类型按照展示顺序从小到大排列',
 ]
@@ -38,8 +51,24 @@ const stepHints = [
 let nextMetricId = 1
 let nextUploadConfigId = 1
 let focusTimerId = 0
+let createConfirmationTimerId = 0
 let fileReadVersion = 0
 let isUnmounted = false
+
+const MAX_ICON_EDGE = 1600
+const MAX_COMPRESSED_ICON_BYTES = 60 * 1024
+const BACKGROUND_COLOR_TOLERANCE = 62
+const UPLOAD_RECORD_TYPES = ['普通凭证', '月初记录', '月末记录']
+const PAIRED_UPLOAD_RECORD_TYPES = ['月初记录', '月末记录']
+const UPLOAD_CONFIG_MODES = [
+  { value: 'ordinary', label: '普通凭证' },
+  { value: 'monthly-pair', label: '月初 + 月末记录' },
+]
+const DEFAULT_UPLOAD_SORT_ORDERS = {
+  普通凭证: 0,
+  月初记录: 10,
+  月末记录: 20,
+}
 
 function createMetricDraft() {
   return {
@@ -56,23 +85,25 @@ const levelRules = ref(props.levels.map((level) => ({
   levelId: level.id,
   subDesc: '',
   ruleNote: '',
-  status: true,
 })))
 
-function createUploadConfigDraft() {
-  const draftIndex = nextUploadConfigId - 1
-
+function createUploadConfigDraft(recordType = '') {
   return {
     id: nextUploadConfigId++,
-    recordType: draftIndex === 0 ? '普通凭证' : '',
+    recordType,
     uploadHint: '',
     noteExample: '',
-    sortOrder: draftIndex * 10,
-    status: true,
+    sortOrder: DEFAULT_UPLOAD_SORT_ORDERS[recordType] ?? 0,
   }
 }
 
-const uploadConfigs = ref([createUploadConfigDraft()])
+const uploadConfigMode = ref(UPLOAD_CONFIG_MODES[0].value)
+const uploadConfigDrafts = ref(UPLOAD_RECORD_TYPES.map(createUploadConfigDraft))
+const uploadConfigs = computed(() => (
+  uploadConfigMode.value === 'ordinary'
+    ? uploadConfigDrafts.value.filter((config) => config.recordType === '普通凭证')
+    : uploadConfigDrafts.value.filter((config) => PAIRED_UPLOAD_RECORD_TYPES.includes(config.recordType))
+))
 
 function addMetric() {
   metrics.value.push(createMetricDraft())
@@ -89,27 +120,231 @@ function removeMetric(metricId) {
   validationMessage.value = ''
 }
 
-function addUploadConfig() {
-  uploadConfigs.value.push(createUploadConfigDraft())
+function handleUploadConfigModeChange() {
+  clearCreateConfirmation()
   validationMessage.value = ''
 }
 
-function removeUploadConfig(configId) {
-  if (uploadConfigs.value.length === 1) {
-    validationMessage.value = '一个运动项目至少需要一种凭证类型'
-    return
+function clearCreateConfirmation() {
+  window.clearTimeout(createConfirmationTimerId)
+  createConfirmationTimerId = 0
+  isCreateConfirmationActive.value = false
+}
+
+function handleDraftMutation() {
+  // 确认态只对应用户第一次点击时的表单快照，任何字段变化都必须重新确认。
+  clearCreateConfirmation()
+  emit('clear-error')
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.addEventListener('load', () => resolve(String(reader.result ?? '')))
+    reader.addEventListener('error', () => reject(new Error('read-failed')))
+    reader.readAsDataURL(file)
+  })
+}
+
+function loadImage(dataUrl) {
+  return new Promise((resolve, reject) => {
+    const image = new Image()
+    image.addEventListener('load', () => resolve(image), { once: true })
+    image.addEventListener('error', () => reject(new Error('decode-failed')), { once: true })
+    image.src = dataUrl
+  })
+}
+
+function canvasToWebpBlob(canvas, quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      // 部分旧浏览器会静默回退为 PNG，必须核验实际媒体类型，避免伪装格式上传。
+      if (!blob || blob.type !== 'image/webp') {
+        reject(new Error('webp-encode-failed'))
+        return
+      }
+      resolve(blob)
+    }, 'image/webp', quality)
+  })
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.addEventListener('load', () => resolve(String(reader.result ?? '')))
+    reader.addEventListener('error', () => reject(new Error('blob-read-failed')))
+    reader.readAsDataURL(blob)
+  })
+}
+
+function resizeCanvas(sourceCanvas, width, height) {
+  const resizedCanvas = document.createElement('canvas')
+  const context = resizedCanvas.getContext('2d')
+  if (!context) throw new Error('canvas-unavailable')
+
+  resizedCanvas.width = width
+  resizedCanvas.height = height
+  context.imageSmoothingEnabled = true
+  context.imageSmoothingQuality = 'high'
+  context.drawImage(sourceCanvas, 0, 0, width, height)
+  return resizedCanvas
+}
+
+async function compressWebpCanvas(sourceCanvas) {
+  let workingCanvas = sourceCanvas
+  const qualitySteps = [0.92, 0.84, 0.76, 0.68, 0.6, 0.52, 0.44, 0.36]
+
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    let smallestBlob = null
+    for (const quality of qualitySteps) {
+      const blob = await canvasToWebpBlob(workingCanvas, quality)
+      if (blob.size <= MAX_COMPRESSED_ICON_BYTES) return blob
+      if (!smallestBlob || blob.size < smallestBlob.size) smallestBlob = blob
+    }
+
+    if (workingCanvas.width === 1 && workingCanvas.height === 1) break
+
+    // 质量递减后仍超限才等比缩小，优先保留图标分辨率与透明边缘细节。
+    const estimatedScale = Math.sqrt(MAX_COMPRESSED_ICON_BYTES / smallestBlob.size) * 0.94
+    const scale = Math.max(0.45, Math.min(0.88, estimatedScale))
+    const nextWidth = Math.max(1, Math.floor(workingCanvas.width * scale))
+    const nextHeight = Math.max(1, Math.floor(workingCanvas.height * scale))
+    workingCanvas = resizeCanvas(
+      workingCanvas,
+      nextWidth === workingCanvas.width ? Math.max(1, nextWidth - 1) : nextWidth,
+      nextHeight === workingCanvas.height ? Math.max(1, nextHeight - 1) : nextHeight,
+    )
   }
 
-  uploadConfigs.value = uploadConfigs.value.filter((config) => config.id !== configId)
-  validationMessage.value = ''
+  throw new Error('webp-too-large')
 }
 
-function handleIconChange(event) {
+function formatFileSize(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return ''
+  return `${Math.max(1, Math.ceil(bytes / 1024))} KB`
+}
+
+function getDominantBorderColor(pixels, width, height) {
+  const colorBuckets = new Map()
+  const borderIndexes = []
+
+  for (let x = 0; x < width; x += 1) {
+    borderIndexes.push(x, (height - 1) * width + x)
+  }
+  for (let y = 1; y < height - 1; y += 1) {
+    borderIndexes.push(y * width, y * width + width - 1)
+  }
+
+  for (const pixelIndex of borderIndexes) {
+    const offset = pixelIndex * 4
+    if (pixels[offset + 3] < 32) continue
+
+    // 量化边缘颜色可以吸收 WebP 抗锯齿和轻微压缩噪声，定位主要纯色背景。
+    const key = `${pixels[offset] >> 4}-${pixels[offset + 1] >> 4}-${pixels[offset + 2] >> 4}`
+    const bucket = colorBuckets.get(key) ?? { count: 0, red: 0, green: 0, blue: 0 }
+    bucket.count += 1
+    bucket.red += pixels[offset]
+    bucket.green += pixels[offset + 1]
+    bucket.blue += pixels[offset + 2]
+    colorBuckets.set(key, bucket)
+  }
+
+  const dominantBucket = [...colorBuckets.values()].sort((left, right) => right.count - left.count)[0]
+  if (!dominantBucket) return null
+
+  return {
+    red: dominantBucket.red / dominantBucket.count,
+    green: dominantBucket.green / dominantBucket.count,
+    blue: dominantBucket.blue / dominantBucket.count,
+  }
+}
+
+function makeConnectedBackgroundTransparent(imageData) {
+  const { data: pixels, width, height } = imageData
+  const backgroundColor = getDominantBorderColor(pixels, width, height)
+  if (!backgroundColor) return imageData
+
+  const pixelCount = width * height
+  const visited = new Uint8Array(pixelCount)
+  const queue = new Int32Array(pixelCount)
+  let queueStart = 0
+  let queueEnd = 0
+
+  function getColorDistance(pixelIndex) {
+    const offset = pixelIndex * 4
+    if (pixels[offset + 3] < 32) return 0
+    const redDiff = pixels[offset] - backgroundColor.red
+    const greenDiff = pixels[offset + 1] - backgroundColor.green
+    const blueDiff = pixels[offset + 2] - backgroundColor.blue
+    return Math.sqrt(redDiff ** 2 + greenDiff ** 2 + blueDiff ** 2)
+  }
+
+  function enqueue(pixelIndex) {
+    if (visited[pixelIndex] || getColorDistance(pixelIndex) > BACKGROUND_COLOR_TOLERANCE) return
+    visited[pixelIndex] = 1
+    queue[queueEnd] = pixelIndex
+    queueEnd += 1
+  }
+
+  for (let x = 0; x < width; x += 1) {
+    enqueue(x)
+    enqueue((height - 1) * width + x)
+  }
+  for (let y = 1; y < height - 1; y += 1) {
+    enqueue(y * width)
+    enqueue(y * width + width - 1)
+  }
+
+  while (queueStart < queueEnd) {
+    const pixelIndex = queue[queueStart]
+    queueStart += 1
+    const x = pixelIndex % width
+    const y = Math.floor(pixelIndex / width)
+    const offset = pixelIndex * 4
+    const distance = getColorDistance(pixelIndex)
+
+    // 仅清除从画布边缘连通的近似背景，并在色差边缘保留柔和透明过渡。
+    const featherRatio = Math.max(0, Math.min(1, (distance - 18) / (BACKGROUND_COLOR_TOLERANCE - 18)))
+    pixels[offset + 3] = Math.min(pixels[offset + 3], Math.round(255 * featherRatio))
+
+    if (x > 0) enqueue(pixelIndex - 1)
+    if (x < width - 1) enqueue(pixelIndex + 1)
+    if (y > 0) enqueue(pixelIndex - width)
+    if (y < height - 1) enqueue(pixelIndex + width)
+  }
+
+  return imageData
+}
+
+async function convertWebpToTransparentDataUrl(sourceDataUrl) {
+  const image = await loadImage(sourceDataUrl)
+  const scale = Math.min(1, MAX_ICON_EDGE / Math.max(image.naturalWidth, image.naturalHeight))
+  const width = Math.max(1, Math.round(image.naturalWidth * scale))
+  const height = Math.max(1, Math.round(image.naturalHeight * scale))
+  const canvas = document.createElement('canvas')
+  const context = canvas.getContext('2d', { willReadFrequently: true })
+  if (!context) throw new Error('canvas-unavailable')
+
+  canvas.width = width
+  canvas.height = height
+  context.drawImage(image, 0, 0, width, height)
+  const transparentImage = makeConnectedBackgroundTransparent(context.getImageData(0, 0, width, height))
+  context.putImageData(transparentImage, 0, 0)
+  const compressedBlob = await compressWebpCanvas(canvas)
+
+  return {
+    dataUrl: await blobToDataUrl(compressedBlob),
+    blob: compressedBlob,
+    size: compressedBlob.size,
+  }
+}
+
+async function handleIconChange(event) {
   const [file] = event.target.files ?? []
   if (!file) return
 
-  if (!file.type.startsWith('image/')) {
-    validationMessage.value = '运动图标必须是图片文件'
+  if (file.type !== 'image/webp' || !file.name.toLowerCase().endsWith('.webp')) {
+    validationMessage.value = '运动图标仅支持 WebP 格式'
     event.target.value = ''
     return
   }
@@ -121,27 +356,39 @@ function handleIconChange(event) {
   }
 
   const currentVersion = ++fileReadVersion
-  const reader = new FileReader()
+  isIconProcessing.value = true
+  validationMessage.value = ''
 
-  reader.addEventListener('load', () => {
+  try {
+    const sourceDataUrl = await readFileAsDataUrl(file)
+    const transparentIcon = await convertWebpToTransparentDataUrl(sourceDataUrl)
     if (isUnmounted || currentVersion !== fileReadVersion) return
 
-    iconDataUrl.value = String(reader.result ?? '')
+    iconDataUrl.value = transparentIcon.dataUrl
+    const normalizedFileName = `${file.name.replace(/\.webp$/i, '')}.webp`
+    iconFile.value = new File([transparentIcon.blob], normalizedFileName, {
+      type: 'image/webp',
+      lastModified: Date.now(),
+    })
     iconFileName.value = file.name
+    iconFileSize.value = transparentIcon.size
     validationMessage.value = ''
-  })
-  reader.addEventListener('error', () => {
+  } catch {
     if (isUnmounted || currentVersion !== fileReadVersion) return
-
-    validationMessage.value = '运动图标读取失败，请重新选择'
-  })
-  reader.readAsDataURL(file)
+    validationMessage.value = 'WebP 透明化或压缩失败，请更换图片后重试'
+    event.target.value = ''
+  } finally {
+    if (!isUnmounted && currentVersion === fileReadVersion) isIconProcessing.value = false
+  }
 }
 
 function clearIcon() {
   fileReadVersion += 1
   iconDataUrl.value = ''
+  iconFile.value = null
   iconFileName.value = ''
+  iconFileSize.value = 0
+  isIconProcessing.value = false
   validationMessage.value = ''
   if (iconInputRef.value) iconInputRef.value.value = ''
 }
@@ -168,7 +415,12 @@ function validateProjectStep() {
     return false
   }
 
-  if (!iconDataUrl.value) {
+  if (isIconProcessing.value) {
+    validationMessage.value = '运动图标正在处理，请稍候'
+    return false
+  }
+
+  if (!iconDataUrl.value || !iconFile.value) {
     validationMessage.value = '请上传运动图标'
     return false
   }
@@ -187,6 +439,11 @@ function normalizeMetrics() {
 }
 
 function validateRuleStep() {
+  if (!props.levels.length) {
+    validationMessage.value = '请先配置至少一个挑战等级'
+    return false
+  }
+
   const normalizedMetrics = normalizeMetrics()
 
   if (normalizedMetrics.some((metric) => !metric.label)) {
@@ -214,11 +471,12 @@ function validateRuleStep() {
 
 function normalizeUploadConfigs() {
   return uploadConfigs.value.map((config) => ({
-    recordType: config.recordType.trim(),
+    recordType: config.recordType,
     uploadHint: config.uploadHint.trim(),
     noteExample: config.noteExample.trim(),
     sortOrder: Number(config.sortOrder),
-    status: config.status ? 1 : 0,
+    // 三种新建凭证配置都固定启用，第三步不开放状态切换。
+    status: 1,
   }))
 }
 
@@ -226,13 +484,27 @@ function validateUploadStep() {
   const normalizedConfigs = normalizeUploadConfigs()
 
   if (normalizedConfigs.some((config) => !config.recordType)) {
-    validationMessage.value = '请填写每一种凭证类型的名称'
+    validationMessage.value = '请选择每一种凭证类型'
+    return false
+  }
+
+  if (normalizedConfigs.some((config) => !UPLOAD_RECORD_TYPES.includes(config.recordType))) {
+    validationMessage.value = '凭证类型不在允许范围内'
     return false
   }
 
   const recordTypes = normalizedConfigs.map((config) => config.recordType)
   if (new Set(recordTypes).size !== recordTypes.length) {
     validationMessage.value = '同一项目内不能添加重复的凭证类型'
+    return false
+  }
+
+  const recordTypeSet = new Set(recordTypes)
+  const usesOrdinaryConfig = normalizedConfigs.length === 1 && recordTypeSet.has('普通凭证')
+  const usesPairedConfig = normalizedConfigs.length === 2
+    && PAIRED_UPLOAD_RECORD_TYPES.every((recordType) => recordTypeSet.has(recordType))
+  if (!usesOrdinaryConfig && !usesPairedConfig) {
+    validationMessage.value = '请选择普通凭证，或同时配置月初记录和月末记录'
     return false
   }
 
@@ -262,6 +534,8 @@ function validateStep(stepIndex) {
 function goToStep(stepIndex) {
   if (stepIndex === activeStep.value) return
 
+  clearCreateConfirmation()
+
   if (stepIndex < activeStep.value) {
     activeStep.value = stepIndex
     validationMessage.value = ''
@@ -276,6 +550,7 @@ function goToStep(stepIndex) {
 }
 
 function goToNextStep() {
+  clearCreateConfirmation()
   if (!validateStep(activeStep.value)) return
   if (activeStep.value < formSteps.length - 1) activeStep.value += 1
 }
@@ -283,50 +558,94 @@ function goToNextStep() {
 function goToPreviousStep() {
   if (activeStep.value === 0) return
 
+  clearCreateConfirmation()
   activeStep.value -= 1
   validationMessage.value = ''
 }
 
 function handleSubmit() {
+  if (props.submitting) return
+
   if (!validateProjectStep()) {
+    clearCreateConfirmation()
     activeStep.value = 0
     return
   }
   if (!validateRuleStep()) {
+    clearCreateConfirmation()
     activeStep.value = 1
     return
   }
   if (!validateUploadStep()) {
+    clearCreateConfirmation()
     activeStep.value = 2
     return
   }
 
+  if (!isCreateConfirmationActive.value) {
+    emit('clear-error')
+    isCreateConfirmationActive.value = true
+    createConfirmationTimerId = window.setTimeout(
+      clearCreateConfirmation,
+      CREATE_CONFIRMATION_TIMEOUT_MS,
+    )
+    return
+  }
+
+  clearCreateConfirmation()
+
   const normalizedMetrics = normalizeMetrics()
 
   emit('submit', {
-    name: projectName.value.trim(),
-    description: projectDescription.value.trim(),
-    status: projectStatus.value ? 1 : 0,
-    iconDataUrl: iconDataUrl.value,
-    iconFileName: iconFileName.value,
-    metrics: normalizedMetrics,
-    levelRules: levelRules.value.map((rule) => ({
-      levelId: rule.levelId,
-      subDesc: rule.subDesc.trim(),
-      ruleNote: rule.ruleNote.trim(),
-      status: rule.status ? 1 : 0,
-      ruleContent: normalizedMetrics.map((metric) => ({
+    project: {
+      name: projectName.value.trim(),
+      description: projectDescription.value.trim(),
+      // 新项目的规则与上传配置尚处于首次录入流程，固定隐藏可避免半成品提前开放。
+      status: 0,
+    },
+    project_rules: levelRules.value.map((rule) => ({
+      level_id: rule.levelId,
+      sub_desc: rule.subDesc.trim() || null,
+      rule_content: normalizedMetrics.map((metric) => ({
         label: metric.label,
         value: metric.values[rule.levelId],
       })),
+      rule_note: rule.ruleNote.trim() || null,
+      // 新建项目必须为等级目录中的全部等级建立可见规则，不在第二步开放隐藏能力。
+      status: 1,
     })),
-    uploadConfigs: normalizeUploadConfigs(),
+    project_upload_configs: normalizeUploadConfigs().map((config) => ({
+      record_type: config.recordType,
+      upload_hint: config.uploadHint,
+      note_example: config.noteExample || null,
+      sort_order: config.sortOrder,
+      status: config.status,
+    })),
+    // 处理后的 WebP 作为独立 multipart 文件发送，不进入 project JSON 字符串。
+    icon_file: iconFile.value,
   })
 }
 
 function handleBackdropClick(event) {
-  if (event.target === event.currentTarget) emit('cancel')
+  if (!props.submitting && event.target === event.currentTarget) emit('cancel')
 }
+
+function handleEscape() {
+  if (props.submitting) return
+  if (isCreateConfirmationActive.value) {
+    clearCreateConfirmation()
+    return
+  }
+  emit('cancel')
+}
+
+const footerMessage = computed(() => {
+  if (validationMessage.value) return validationMessage.value
+  if (props.submitError) return props.submitError
+  if (props.submitting) return '正在创建运动项目并上传图标…'
+  if (isCreateConfirmationActive.value) return '请在 3 秒内再次点击“确认创建”'
+  return stepHints[activeStep.value]
+})
 
 onMounted(() => {
   focusTimerId = window.setTimeout(() => nameInputRef.value?.focus(), 480)
@@ -336,6 +655,7 @@ onBeforeUnmount(() => {
   isUnmounted = true
   fileReadVersion += 1
   window.clearTimeout(focusTimerId)
+  clearCreateConfirmation()
 })
 </script>
 
@@ -343,50 +663,58 @@ onBeforeUnmount(() => {
   <div
     class="sport-project-create-layer"
     @click="handleBackdropClick"
-    @keydown.esc.prevent.stop="emit('cancel')"
+    @keydown.esc.prevent.stop="handleEscape"
   >
     <section
       class="sport-project-create-sheet"
       role="dialog"
       aria-modal="true"
       aria-label="新建运动项目"
+      :aria-busy="submitting"
     >
       <header class="sport-project-create-sheet__header">
         <div>
           <h2>新建运动项目</h2>
           <span>完整设置项目资料、等级规则与凭证上传方式</span>
         </div>
-        <button type="button" aria-label="关闭新建运动项目表单" @click="emit('cancel')">
+        <button
+          type="button"
+          aria-label="关闭新建运动项目表单"
+          :disabled="submitting"
+          @click="emit('cancel')"
+        >
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="m7 7 10 10M17 7 7 17" />
           </svg>
         </button>
       </header>
 
-      <nav class="sport-project-create-sheet__steps" aria-label="新建项目步骤">
-        <button
-          v-for="(step, index) in formSteps"
-          :key="step.id"
-          type="button"
-          :class="{
-            'is-active': activeStep === index,
-            'is-complete': activeStep > index,
-          }"
-          :aria-current="activeStep === index ? 'step' : undefined"
-          @click="goToStep(index)"
-        >
-          <span>{{ index + 1 }}</span>
-          <span>
+      <div class="sport-project-create-sheet__workspace" :inert="submitting">
+        <nav class="sport-project-create-sheet__steps" aria-label="新建项目步骤">
+          <button
+            v-for="(step, index) in formSteps"
+            :key="step.id"
+            type="button"
+            :class="{
+              'is-active': activeStep === index,
+              'is-complete': activeStep > index,
+            }"
+            :aria-current="activeStep === index ? 'step' : undefined"
+            @click="goToStep(index)"
+          >
+            <span class="sport-project-create-sheet__step-node" aria-hidden="true">
+              <span>{{ index + 1 }}</span>
+            </span>
             <strong>{{ step.label }}</strong>
-            <small>{{ step.description }}</small>
-          </span>
-        </button>
-      </nav>
+          </button>
+        </nav>
 
-      <form
-        class="sport-project-create-sheet__form"
-        @submit.prevent="activeStep === formSteps.length - 1 ? handleSubmit() : goToNextStep()"
-      >
+        <form
+          class="sport-project-create-sheet__form"
+          @input="handleDraftMutation"
+          @change="handleDraftMutation"
+          @submit.prevent="activeStep === formSteps.length - 1 ? handleSubmit() : goToNextStep()"
+        >
         <div class="sport-project-create-sheet__body">
           <Transition name="sport-project-form-step" mode="out-in">
             <section
@@ -396,6 +724,14 @@ onBeforeUnmount(() => {
               aria-label="运动项目基础信息"
             >
               <div class="sport-project-create-sheet__fields">
+                <header class="sport-project-create-sheet__basic-heading">
+                  <span aria-hidden="true">01</span>
+                  <div>
+                    <strong>项目信息</strong>
+                    <small>填写对用户展示的名称与简要说明</small>
+                  </div>
+                </header>
+
                 <label>
                   <span>运动名称</span>
                   <input
@@ -418,35 +754,41 @@ onBeforeUnmount(() => {
                     @input="validationMessage = ''"
                   ></textarea>
                 </label>
-
-                <label class="sport-project-status-field">
-                  <span>项目状态</span>
-                  <span class="sport-project-status-field__control">
-                    <input v-model="projectStatus" type="checkbox" />
-                    <span aria-hidden="true"><i></i></span>
-                    <strong>{{ projectStatus ? '启用' : '停用' }}</strong>
-                  </span>
-                  <small>停用项目不会开放给用户选择</small>
-                </label>
               </div>
 
               <div class="sport-project-icon-field">
-                <span>运动图标</span>
+                <header class="sport-project-create-sheet__basic-heading">
+                  <span aria-hidden="true">02</span>
+                  <div>
+                    <strong>运动图标</strong>
+                    <small>使用轮廓清晰的透明底图片效果更佳</small>
+                  </div>
+                </header>
                 <label
                   class="sport-project-icon-upload"
-                  :class="{ 'has-image': iconDataUrl }"
+                  :class="{
+                    'has-image': iconDataUrl,
+                    'is-processing': isIconProcessing,
+                  }"
                 >
                   <input
                     ref="iconInputRef"
                     type="file"
-                    accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                    accept="image/webp,.webp"
+                    :disabled="isIconProcessing"
                     @change="handleIconChange"
                   />
 
-                  <template v-if="iconDataUrl">
+                  <template v-if="isIconProcessing">
+                    <span class="sport-project-icon-upload__loader" aria-hidden="true"></span>
+                    <strong>正在处理透明背景</strong>
+                    <small>完成后会自动显示预览</small>
+                  </template>
+
+                  <template v-else-if="iconDataUrl">
                     <img :src="iconDataUrl" alt="运动图标预览" />
                     <span>{{ iconFileName }}</span>
-                    <small>点击更换图标</small>
+                    <small>{{ formatFileSize(iconFileSize) }} · 点击更换图标</small>
                   </template>
 
                   <template v-else>
@@ -456,7 +798,7 @@ onBeforeUnmount(() => {
                       </svg>
                     </span>
                     <strong>上传运动图标</strong>
-                    <small>PNG、JPG、WebP 或 SVG</small>
+                    <small>仅支持 WebP</small>
                   </template>
                 </label>
 
@@ -478,11 +820,6 @@ onBeforeUnmount(() => {
                 >
                   <header>
                     <span>{{ level.name }}</span>
-                    <label class="sport-project-switch">
-                      <input v-model="levelRules[levelIndex].status" type="checkbox" />
-                      <span aria-hidden="true"><i></i></span>
-                      <small>{{ levelRules[levelIndex].status ? '启用规则' : '停用规则' }}</small>
-                    </label>
                   </header>
 
                   <label>
@@ -545,6 +882,7 @@ onBeforeUnmount(() => {
                         v-model="metric.label"
                         type="text"
                         maxlength="64"
+                        required
                         :aria-label="`第 ${metricIndex + 1} 个评价指标名称`"
                         placeholder="例如：累计距离"
                         @input="validationMessage = ''"
@@ -556,6 +894,7 @@ onBeforeUnmount(() => {
                         v-model="metric.values[level.id]"
                         type="text"
                         maxlength="64"
+                        required
                         :aria-label="`${metric.label || `第 ${metricIndex + 1} 个指标`}的${level.name}要求值`"
                         placeholder="填写要求值"
                         @input="validationMessage = ''"
@@ -585,14 +924,20 @@ onBeforeUnmount(() => {
               <header class="sport-project-upload-step__header">
                 <div>
                   <h3>凭证上传配置</h3>
-                  <span>一个项目可以配置一种或多种凭证类型</span>
+                  <span>选择普通凭证，或成对配置月初与月末记录</span>
                 </div>
-                <button type="button" @click="addUploadConfig">
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M12 5v14M5 12h14" />
-                  </svg>
-                  添加凭证类型
-                </button>
+                <label class="sport-project-upload-step__mode">
+                  <span>凭证组合</span>
+                  <select v-model="uploadConfigMode" @change="handleUploadConfigModeChange">
+                    <option
+                      v-for="mode in UPLOAD_CONFIG_MODES"
+                      :key="mode.value"
+                      :value="mode.value"
+                    >
+                      {{ mode.label }}
+                    </option>
+                  </select>
+                </label>
               </header>
 
               <div class="sport-project-upload-step__list">
@@ -603,35 +948,10 @@ onBeforeUnmount(() => {
                 >
                   <header>
                     <span>{{ String(configIndex + 1).padStart(2, '0') }}</span>
-                    <strong>{{ config.recordType || '未命名凭证' }}</strong>
-                    <label class="sport-project-switch">
-                      <input v-model="config.status" type="checkbox" />
-                      <span aria-hidden="true"><i></i></span>
-                      <small>{{ config.status ? '启用' : '停用' }}</small>
-                    </label>
-                    <button
-                      type="button"
-                      :aria-label="`删除第 ${configIndex + 1} 个凭证类型`"
-                      @click="removeUploadConfig(config.id)"
-                    >
-                      <svg viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M8 8l8 8M16 8l-8 8" />
-                      </svg>
-                    </button>
+                    <strong>{{ config.recordType }}</strong>
                   </header>
 
                   <div class="sport-project-upload-config__fields">
-                    <label>
-                      <span>凭证类型</span>
-                      <input
-                        v-model="config.recordType"
-                        type="text"
-                        maxlength="64"
-                        placeholder="例如：普通凭证"
-                        @input="validationMessage = ''"
-                      />
-                    </label>
-
                     <label class="sport-project-upload-config__sort">
                       <span>展示顺序</span>
                       <input
@@ -673,17 +993,59 @@ onBeforeUnmount(() => {
         </div>
 
         <footer class="sport-project-create-sheet__footer">
-          <p :class="{ 'is-visible': validationMessage }" role="alert">
-            {{ validationMessage || stepHints[activeStep] }}
+          <p
+            :class="{
+              'is-visible': validationMessage || submitError,
+              'is-confirming': isCreateConfirmationActive,
+            }"
+            role="status"
+            aria-live="polite"
+          >
+            <Transition name="sport-project-footer-message" mode="out-in">
+              <span :key="footerMessage">{{ footerMessage }}</span>
+            </Transition>
           </p>
           <div>
-            <button type="button" @click="emit('cancel')">取消</button>
             <button v-if="activeStep > 0" type="button" @click="goToPreviousStep">上一步</button>
             <button v-if="activeStep < formSteps.length - 1" type="submit">下一步</button>
-            <button v-else type="submit">创建项目</button>
+            <button
+              v-else
+              type="submit"
+              class="sport-project-create-sheet__submit"
+              :class="{
+                'is-confirming': isCreateConfirmationActive,
+                'is-submitting': submitting,
+              }"
+              :disabled="submitting"
+              :aria-pressed="isCreateConfirmationActive"
+            >
+              <span class="sport-project-create-sheet__submit-copy">
+                <span
+                  class="sport-project-create-sheet__submit-label is-default"
+                  :aria-hidden="isCreateConfirmationActive || submitting"
+                >创建项目</span>
+                <span
+                  class="sport-project-create-sheet__submit-label is-confirm"
+                  :aria-hidden="!isCreateConfirmationActive || submitting"
+                >确认创建</span>
+                <span
+                  class="sport-project-create-sheet__submit-label is-loading"
+                  :aria-hidden="!submitting"
+                >
+                  <span class="sport-project-create-sheet__submit-spinner" aria-hidden="true"></span>
+                  创建中
+                </span>
+              </span>
+              <span
+                v-if="isCreateConfirmationActive"
+                class="sport-project-create-sheet__confirm-progress"
+                aria-hidden="true"
+              ></span>
+            </button>
           </div>
         </footer>
-      </form>
+        </form>
+      </div>
     </section>
   </div>
 </template>
@@ -768,8 +1130,6 @@ onBeforeUnmount(() => {
 .sport-project-create-sheet__header svg,
 .sport-project-metrics legend button svg,
 .sport-project-metric-row > button svg,
-.sport-project-upload-step__header button svg,
-.sport-project-upload-config header > button svg,
 .sport-project-icon-upload__mark svg {
   fill: none;
   stroke: currentColor;
@@ -783,59 +1143,92 @@ onBeforeUnmount(() => {
   height: 18px;
 }
 
-.sport-project-create-sheet__steps {
-  position: relative;
-  display: grid;
-  min-height: 61px;
-  padding: 8px 27px;
-  flex: 0 0 auto;
-  gap: 10px;
-  background: rgb(255 255 255 / 34%);
-  border-bottom: 1px solid rgb(61 78 69 / 7%);
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+.sport-project-create-sheet__workspace {
+  display: flex;
+  min-height: 0;
+  flex: 1;
 }
 
-.sport-project-create-sheet__steps::before {
-  position: absolute;
-  top: 29px;
-  right: 12%;
-  left: 12%;
-  height: 1px;
-  background: rgb(68 101 86 / 9%);
-  content: '';
-  pointer-events: none;
+.sport-project-create-sheet__steps {
+  position: relative;
+  display: flex;
+  width: 188px;
+  min-height: 0;
+  padding: 31px 18px;
+  flex: 0 0 188px;
+  gap: 8px;
+  background:
+    linear-gradient(180deg, rgb(255 255 255 / 48%), rgb(246 250 247 / 54%)),
+    radial-gradient(circle at 28px 50%, rgb(61 162 135 / 8%), transparent 58%);
+  border-right: 1px solid rgb(61 78 69 / 8%);
+  flex-direction: column;
+  justify-content: center;
 }
 
 .sport-project-create-sheet__steps button {
   position: relative;
   display: flex;
+  min-height: 72px;
   min-width: 0;
-  padding: 4px 9px;
+  padding: 9px 8px;
   align-items: center;
-  gap: 9px;
+  gap: 12px;
   color: #87928c;
   font: inherit;
   text-align: left;
   appearance: none;
   background: transparent;
   border: 0;
-  border-radius: 13px;
+  border-radius: 16px;
   cursor: pointer;
+  transition:
+    background-color 360ms ease,
+    color 360ms ease,
+    transform 420ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.sport-project-create-sheet__steps button > span:first-child {
+.sport-project-create-sheet__steps button:not(:last-child)::before,
+.sport-project-create-sheet__steps button:not(:last-child)::after {
+  position: absolute;
+  z-index: 0;
+  top: calc(50% + 19px);
+  left: 27px;
+  width: 2px;
+  height: 43px;
+  border-radius: 999px;
+  content: '';
+  pointer-events: none;
+}
+
+.sport-project-create-sheet__steps button:not(:last-child)::before {
+  background: rgb(76 103 90 / 12%);
+}
+
+.sport-project-create-sheet__steps button:not(:last-child)::after {
+  background: linear-gradient(180deg, #48a78c, #3c9078);
+  box-shadow: 0 2px 7px rgb(58 137 115 / 22%);
+  transform: scaleY(0);
+  transform-origin: center top;
+  transition: transform 520ms cubic-bezier(0.2, 0.75, 0.25, 1) 120ms;
+}
+
+.sport-project-create-sheet__steps button.is-complete:not(:last-child)::after {
+  transform: scaleY(1);
+}
+
+.sport-project-create-sheet__step-node {
   position: relative;
   z-index: 1;
   display: grid;
-  width: 31px;
-  height: 31px;
+  width: 38px;
+  height: 38px;
   flex: 0 0 auto;
   color: #7c8982;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 780;
   background: #f5f8f5;
   border: 1px solid rgb(73 99 86 / 11%);
-  border-radius: 11px;
+  border-radius: 50%;
   box-shadow: 0 5px 12px rgb(54 72 63 / 5%);
   place-items: center;
   transition:
@@ -845,44 +1238,116 @@ onBeforeUnmount(() => {
     transform 420ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.sport-project-create-sheet__steps button > span:last-child {
-  display: grid;
-  min-width: 0;
-  gap: 1px;
+.sport-project-create-sheet__step-node > span {
+  position: relative;
+  z-index: 2;
 }
 
 .sport-project-create-sheet__steps strong {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
   color: currentColor;
-  font-size: 11px;
-  font-weight: 740;
-}
-
-.sport-project-create-sheet__steps small {
-  overflow: hidden;
-  color: #a0aaa4;
-  font-size: 9px;
-  font-weight: 600;
+  font-size: 13px;
+  font-weight: 760;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .sport-project-create-sheet__steps button.is-active {
-  color: #2e7562;
-  background: rgb(61 162 135 / 6%);
+  color: #a95b26;
+  background: linear-gradient(90deg, rgb(229 132 64 / 12%), rgb(229 132 64 / 3%));
 }
 
-.sport-project-create-sheet__steps button.is-active > span:first-child,
-.sport-project-create-sheet__steps button.is-complete > span:first-child {
+.sport-project-create-sheet__steps button.is-complete .sport-project-create-sheet__step-node {
   color: #f6fbf8;
   background: linear-gradient(145deg, #4aaa8f, #377d6a);
   border-color: rgb(255 255 255 / 16%);
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 20%),
     0 7px 16px rgb(52 121 102 / 18%);
+  animation: sport-project-step-complete 500ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.sport-project-create-sheet__steps button.is-active .sport-project-create-sheet__step-node {
+  color: #fffaf5;
+  background: linear-gradient(145deg, #f1a15f, #d56f31);
+  border-color: rgb(255 255 255 / 22%);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 28%),
+    0 8px 18px rgb(201 103 42 / 24%);
+  animation: sport-project-step-current 520ms cubic-bezier(0.16, 1, 0.3, 1) 420ms both;
+}
+
+.sport-project-create-sheet__steps button.is-active .sport-project-create-sheet__step-node::before,
+.sport-project-create-sheet__steps button.is-active .sport-project-create-sheet__step-node::after {
+  position: absolute;
+  z-index: -1;
+  inset: -1px;
+  border: 1.5px solid rgb(229 132 64 / 58%);
+  border-radius: 50%;
+  content: '';
+  pointer-events: none;
+  animation: sport-project-step-ripple 2.1s cubic-bezier(0.2, 0.7, 0.3, 1) infinite;
+}
+
+.sport-project-create-sheet__steps button.is-active .sport-project-create-sheet__step-node::after {
+  animation-delay: 1.05s;
+}
+
+@keyframes sport-project-step-ripple {
+  0% {
+    opacity: 0.68;
+    transform: scale(1);
+  }
+
+  72%,
+  100% {
+    opacity: 0;
+    transform: scale(1.55);
+  }
+}
+
+/* 推进时依次完成“橙色收束、绿线延伸、下一节点落位”，形成可感知的链式流动。 */
+@keyframes sport-project-step-complete {
+  0% {
+    color: #fffaf5;
+    background: #db7738;
+    transform: scale(1);
+  }
+
+  45% {
+    background: #74b59f;
+    transform: scale(0.82);
+  }
+
+  100% {
+    color: #f6fbf8;
+    background: #3f927b;
+    transform: scale(1);
+  }
+}
+
+@keyframes sport-project-step-current {
+  0% {
+    opacity: 0.35;
+    transform: scale(0.72);
+  }
+
+  68% {
+    opacity: 1;
+    transform: scale(1.12);
+  }
+
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .sport-project-create-sheet__form {
   display: flex;
+  min-width: 0;
   min-height: 0;
   flex: 1;
   flex-direction: column;
@@ -917,15 +1382,66 @@ onBeforeUnmount(() => {
 
 .sport-project-create-sheet__basic {
   display: grid;
-  gap: 17px;
-  grid-template-columns: minmax(0, 1fr) 210px;
+  min-height: 100%;
+  padding: 7px 4px;
+  align-items: stretch;
+  gap: 20px;
+  grid-template-columns: minmax(0, 1.45fr) minmax(240px, 0.75fr);
 }
 
-.sport-project-create-sheet__fields {
+.sport-project-create-sheet__fields,
+.sport-project-icon-field {
   display: grid;
   min-width: 0;
-  gap: 13px;
-  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
+  padding: 19px 20px;
+  align-content: start;
+  gap: 14px;
+  background:
+    linear-gradient(145deg, rgb(255 255 255 / 79%), rgb(249 251 249 / 58%));
+  border: 1px solid rgb(73 99 86 / 9%);
+  border-radius: 22px;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 88%),
+    0 13px 30px rgb(47 68 57 / 6%);
+}
+
+.sport-project-create-sheet__basic-heading {
+  display: flex;
+  min-width: 0;
+  margin-bottom: 2px;
+  align-items: center;
+  gap: 11px;
+}
+
+.sport-project-create-sheet__basic-heading > span {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  color: #3b8e77;
+  font-size: 10px;
+  font-weight: 800;
+  background: rgb(64 157 132 / 10%);
+  border: 1px solid rgb(64 157 132 / 13%);
+  border-radius: 11px;
+  place-items: center;
+}
+
+.sport-project-create-sheet__basic-heading > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.sport-project-create-sheet__basic-heading strong {
+  color: #344139;
+  font-size: 13px;
+  font-weight: 780;
+}
+
+.sport-project-create-sheet__basic-heading small {
+  color: #929c97;
+  font-size: 10px;
 }
 
 .sport-project-create-sheet__fields label,
@@ -944,7 +1460,8 @@ onBeforeUnmount(() => {
 }
 
 .sport-project-create-sheet input,
-.sport-project-create-sheet textarea {
+.sport-project-create-sheet textarea,
+.sport-project-create-sheet select {
   color: #2d3832;
   font: inherit;
   font-size: 14px;
@@ -976,8 +1493,25 @@ onBeforeUnmount(() => {
   resize: none;
 }
 
+.sport-project-create-sheet select {
+  width: 100%;
+  height: 50px;
+  padding: 0 38px 0 14px;
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, #708078 50%),
+    linear-gradient(135deg, #708078 50%, transparent 50%);
+  background-position:
+    calc(100% - 17px) 50%,
+    calc(100% - 12px) 50%;
+  background-repeat: no-repeat;
+  background-size: 5px 5px, 5px 5px;
+  cursor: pointer;
+}
+
 .sport-project-create-sheet input:focus,
-.sport-project-create-sheet textarea:focus {
+.sport-project-create-sheet textarea:focus,
+.sport-project-create-sheet select:focus {
   border-color: rgb(61 153 128 / 44%);
   box-shadow:
     0 0 0 4px rgb(61 153 128 / 8%),
@@ -990,94 +1524,15 @@ onBeforeUnmount(() => {
   font-weight: 540;
 }
 
-.sport-project-status-field {
-  display: grid;
-  align-content: start;
-  gap: 8px;
-}
-
-.sport-project-status-field > span:first-child {
-  color: #536059;
-  font-size: 12px;
-  font-weight: 720;
-}
-
-.sport-project-status-field > small {
-  color: #98a19c;
-  font-size: 10px;
-}
-
-.sport-project-status-field__control {
-  display: flex;
-  height: 50px;
-  padding: 0 14px;
-  align-items: center;
-  gap: 9px;
-  background: rgb(255 255 255 / 58%);
-  border: 1px solid rgb(75 94 84 / 9%);
-  border-radius: 14px;
-}
-
-.sport-project-status-field__control input,
-.sport-project-switch input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  overflow: hidden;
-  opacity: 0;
-}
-
-.sport-project-status-field__control > span,
-.sport-project-switch > span {
-  position: relative;
-  width: 35px;
-  height: 20px;
-  flex: 0 0 auto;
-  background: #d9dfdc;
-  border-radius: 999px;
-  box-shadow: inset 0 1px 3px rgb(47 62 54 / 10%);
-  transition: background-color 320ms ease;
-}
-
-.sport-project-status-field__control i,
-.sport-project-switch i {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 14px;
-  height: 14px;
-  background: #fff;
-  border-radius: 50%;
-  box-shadow: 0 2px 5px rgb(41 56 48 / 18%);
-  transition: transform 340ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.sport-project-status-field__control input:checked + span,
-.sport-project-switch input:checked + span {
-  background: #48a88d;
-}
-
-.sport-project-status-field__control input:checked + span i,
-.sport-project-switch input:checked + span i {
-  transform: translateX(15px);
-}
-
-.sport-project-status-field__control strong {
-  color: #4f6258;
-  font-size: 11px;
-  font-weight: 720;
-}
-
 .sport-project-icon-field {
-  grid-row: span 2;
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 .sport-project-icon-upload {
   position: relative;
   display: grid;
-  min-height: 124px;
-  padding: 13px;
+  min-height: 190px;
+  padding: 18px;
   align-content: center;
   color: #648078;
   text-align: center;
@@ -1116,6 +1571,21 @@ onBeforeUnmount(() => {
   place-items: center;
 }
 
+.sport-project-icon-upload__loader {
+  width: 38px;
+  height: 38px;
+  border: 3px solid rgb(61 149 125 / 14%);
+  border-top-color: #439b82;
+  border-radius: 50%;
+  animation: sport-project-icon-processing 760ms linear infinite;
+}
+
+@keyframes sport-project-icon-processing {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .sport-project-icon-upload__mark svg {
   width: 21px;
   height: 21px;
@@ -1138,8 +1608,8 @@ onBeforeUnmount(() => {
 }
 
 .sport-project-icon-upload img {
-  width: 60px;
-  height: 60px;
+  width: 86px;
+  height: 86px;
   object-fit: contain;
   filter: drop-shadow(0 7px 10px rgb(42 70 59 / 14%));
 }
@@ -1188,35 +1658,6 @@ onBeforeUnmount(() => {
   color: #35473e;
   font-size: 14px;
   font-weight: 790;
-}
-
-.sport-project-switch {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  cursor: pointer;
-}
-
-.sport-project-switch > span {
-  width: 30px;
-  height: 18px;
-}
-
-.sport-project-switch i {
-  top: 3px;
-  width: 12px;
-  height: 12px;
-}
-
-.sport-project-switch input:checked + span i {
-  transform: translateX(12px);
-}
-
-.sport-project-switch small {
-  color: #7e8a83;
-  font-size: 9px;
-  font-weight: 670;
 }
 
 .sport-project-level-draft > label {
@@ -1274,7 +1715,6 @@ onBeforeUnmount(() => {
   font-size: 10px;
 }
 
-.sport-project-upload-step__header > button,
 .sport-project-metrics legend button {
   display: inline-flex;
   height: 34px;
@@ -1291,10 +1731,32 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.sport-project-upload-step__header > button svg,
 .sport-project-metrics legend button svg {
   width: 15px;
   height: 15px;
+}
+
+.sport-project-upload-step__mode {
+  display: grid;
+  min-width: 210px;
+  align-items: center;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.sport-project-upload-step__mode > span {
+  color: #65736b;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.sport-project-upload-step__mode select {
+  height: 38px;
+  padding: 0 34px 0 12px;
+  font-size: 11px;
+  font-weight: 680;
+  border-radius: 12px;
 }
 
 .sport-project-upload-step__list {
@@ -1317,7 +1779,7 @@ onBeforeUnmount(() => {
   margin-bottom: 11px;
   align-items: center;
   gap: 8px;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr);
 }
 
 .sport-project-upload-config > header > span {
@@ -1342,28 +1804,10 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
-.sport-project-upload-config > header > button {
-  display: grid;
-  width: 29px;
-  height: 29px;
-  padding: 0;
-  color: #9a7770;
-  background: rgb(188 102 83 / 7%);
-  border: 1px solid rgb(178 91 72 / 8%);
-  border-radius: 9px;
-  cursor: pointer;
-  place-items: center;
-}
-
-.sport-project-upload-config > header > button svg {
-  width: 15px;
-  height: 15px;
-}
-
 .sport-project-upload-config__fields {
   display: grid;
   gap: 9px;
-  grid-template-columns: minmax(140px, 0.68fr) 100px minmax(190px, 1.15fr) minmax(190px, 1fr);
+  grid-template-columns: 100px minmax(190px, 1.15fr) minmax(190px, 1fr);
 }
 
 .sport-project-upload-config__fields label {
@@ -1509,6 +1953,12 @@ onBeforeUnmount(() => {
   opacity: 1;
 }
 
+.sport-project-create-sheet__footer p.is-confirming {
+  color: #548070;
+  font-weight: 680;
+  opacity: 1;
+}
+
 .sport-project-create-sheet__footer > div {
   display: flex;
   gap: 9px;
@@ -1540,6 +1990,143 @@ onBeforeUnmount(() => {
     0 9px 20px rgb(54 115 104 / 22%);
 }
 
+.sport-project-create-sheet__submit {
+  position: relative;
+  min-width: 94px;
+  overflow: hidden;
+}
+
+.sport-project-create-sheet__submit::before {
+  position: absolute;
+  background: linear-gradient(135deg, #df8b42, #d66a4f);
+  content: '';
+  inset: 0;
+  opacity: 0;
+  transition: opacity 360ms ease;
+}
+
+.sport-project-create-sheet__submit.is-confirming {
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 22%),
+    0 11px 24px rgb(187 91 57 / 27%);
+  transform: translateY(-1px) scale(1.025);
+}
+
+.sport-project-create-sheet__submit.is-confirming::before {
+  opacity: 1;
+}
+
+.sport-project-create-sheet__submit-copy {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  min-width: 60px;
+  place-items: center;
+}
+
+.sport-project-create-sheet__submit-label {
+  grid-area: 1 / 1;
+  transition:
+    opacity 260ms ease,
+    transform 420ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sport-project-create-sheet__submit-label.is-confirm {
+  opacity: 0;
+  transform: translateY(12px);
+}
+
+.sport-project-create-sheet__submit-label.is-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0;
+  transform: translateY(12px);
+}
+
+.sport-project-create-sheet__submit.is-confirming .sport-project-create-sheet__submit-label.is-default {
+  opacity: 0;
+  transform: translateY(-12px);
+}
+
+.sport-project-create-sheet__submit.is-confirming .sport-project-create-sheet__submit-label.is-confirm {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.sport-project-create-sheet__submit.is-submitting .sport-project-create-sheet__submit-label.is-default,
+.sport-project-create-sheet__submit.is-submitting .sport-project-create-sheet__submit-label.is-confirm {
+  opacity: 0;
+  transform: translateY(-12px);
+}
+
+.sport-project-create-sheet__submit.is-submitting .sport-project-create-sheet__submit-label.is-loading {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.sport-project-create-sheet__submit-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgb(255 255 255 / 38%);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: sport-project-create-spinner 700ms linear infinite;
+}
+
+.sport-project-create-sheet__confirm-progress {
+  position: absolute;
+  z-index: 1;
+  right: 10px;
+  bottom: 3px;
+  left: 10px;
+  height: 2px;
+  background: rgb(255 255 255 / 78%);
+  border-radius: 999px;
+  transform-origin: left;
+  animation: sport-project-create-confirm-progress 3s linear forwards;
+}
+
+.sport-project-footer-message-enter-active,
+.sport-project-footer-message-leave-active {
+  transition:
+    opacity 220ms ease,
+    transform 320ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sport-project-footer-message-enter-from {
+  opacity: 0;
+  transform: translateY(5px);
+}
+
+.sport-project-footer-message-leave-to {
+  opacity: 0;
+  transform: translateY(-5px);
+}
+
+@keyframes sport-project-create-confirm-progress {
+  from {
+    transform: scaleX(1);
+  }
+
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes sport-project-create-spinner {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+.sport-project-create-sheet__header > button:disabled,
+.sport-project-create-sheet__footer button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+  transform: none;
+}
+
 .sport-project-create-enter-active,
 .sport-project-create-leave-active {
   transition:
@@ -1569,13 +2156,12 @@ onBeforeUnmount(() => {
   .sport-project-create-sheet__header > button:hover,
   .sport-project-create-sheet__footer button:hover,
   .sport-project-metric-row > button:hover,
-  .sport-project-upload-config > header > button:hover,
-  .sport-project-upload-step__header > button:hover {
+  .sport-project-metrics legend button:hover {
     transform: translateY(-2px);
   }
 
-  .sport-project-create-sheet__steps button:hover > span:first-child {
-    transform: translateY(-2px);
+  .sport-project-create-sheet__steps button:hover .sport-project-create-sheet__step-node {
+    transform: scale(1.06);
   }
 
   .sport-project-icon-upload:hover {
@@ -1586,16 +2172,62 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 820px) {
+  .sport-project-create-sheet__workspace {
+    flex-direction: column;
+  }
+
+  .sport-project-create-sheet__steps {
+    width: auto;
+    min-height: 72px;
+    padding: 7px 22px;
+    flex: 0 0 72px;
+    gap: 5px;
+    background: rgb(255 255 255 / 34%);
+    border-right: 0;
+    border-bottom: 1px solid rgb(61 78 69 / 7%);
+    flex-direction: row;
+  }
+
+  .sport-project-create-sheet__steps button {
+    min-height: 0;
+    padding: 5px 8px;
+    flex: 1;
+    justify-content: center;
+  }
+
+  .sport-project-create-sheet__steps button:not(:last-child)::before,
+  .sport-project-create-sheet__steps button:not(:last-child)::after {
+    top: 50%;
+    left: calc(50% + 25px);
+    width: calc(100% - 43px);
+    height: 2px;
+    transform: translateY(-50%);
+  }
+
+  .sport-project-create-sheet__steps button:not(:last-child)::after {
+    transform: translateY(-50%) scaleX(0);
+    transform-origin: center left;
+  }
+
+  .sport-project-create-sheet__steps button.is-complete:not(:last-child)::after {
+    transform: translateY(-50%) scaleX(1);
+  }
+
+  .sport-project-create-sheet__step-node {
+    width: 34px;
+    height: 34px;
+  }
+
   .sport-project-create-sheet__basic {
     grid-template-columns: 1fr;
   }
 
   .sport-project-icon-field {
-    grid-row: auto;
+    grid-template-rows: auto auto auto;
   }
 
   .sport-project-icon-upload {
-    min-height: 112px;
+    min-height: 150px;
   }
 
   .sport-project-metrics {
@@ -1608,7 +2240,7 @@ onBeforeUnmount(() => {
   }
 
   .sport-project-upload-config__fields {
-    grid-template-columns: minmax(0, 1fr) 90px;
+    grid-template-columns: 90px minmax(0, 1fr);
   }
 
   .sport-project-upload-config__fields label:nth-child(n + 3) {
@@ -1634,18 +2266,31 @@ onBeforeUnmount(() => {
   .sport-project-create-sheet__steps button {
     justify-content: center;
     padding: 4px;
+    gap: 7px;
   }
 
-  .sport-project-create-sheet__steps button > span:last-child {
-    display: none;
+  .sport-project-create-sheet__steps strong {
+    font-size: 11px;
   }
 
   .sport-project-create-sheet__body {
     padding: 19px 18px 22px;
   }
 
-  .sport-project-create-sheet__fields {
-    grid-template-columns: 1fr;
+  .sport-project-create-sheet__fields,
+  .sport-project-icon-field {
+    padding: 16px;
+  }
+
+  .sport-project-upload-step__header {
+    align-items: stretch;
+    gap: 12px;
+    flex-direction: column;
+  }
+
+  .sport-project-upload-step__mode {
+    width: 100%;
+    min-width: 0;
   }
 
   .sport-project-create-sheet__footer {
@@ -1670,16 +2315,40 @@ onBeforeUnmount(() => {
   .sport-project-create-leave-active .sport-project-create-sheet,
   .sport-project-create-sheet__header > button,
   .sport-project-create-sheet__footer button,
+  .sport-project-create-sheet__submit::before,
+  .sport-project-create-sheet__submit-label,
+  .sport-project-footer-message-enter-active,
+  .sport-project-footer-message-leave-active,
   .sport-project-metric-row > button,
   .sport-project-icon-upload,
   .sport-project-form-step-enter-active,
   .sport-project-form-step-leave-active,
-  .sport-project-create-sheet__steps button > span:first-child,
-  .sport-project-status-field__control > span,
-  .sport-project-status-field__control i,
-  .sport-project-switch > span,
-  .sport-project-switch i {
+  .sport-project-create-sheet__steps button,
+  .sport-project-create-sheet__steps button:not(:last-child)::after,
+  .sport-project-create-sheet__step-node {
     transition: none;
+  }
+
+  .sport-project-create-sheet__steps button.is-active .sport-project-create-sheet__step-node::before,
+  .sport-project-create-sheet__steps button.is-active .sport-project-create-sheet__step-node::after {
+    animation: none;
+  }
+
+  .sport-project-icon-upload__loader {
+    animation: none;
+  }
+
+  .sport-project-create-sheet__confirm-progress {
+    animation: none;
+  }
+
+  .sport-project-create-sheet__submit-spinner {
+    animation: none;
+  }
+
+  .sport-project-create-sheet__steps button.is-active .sport-project-create-sheet__step-node,
+  .sport-project-create-sheet__steps button.is-complete .sport-project-create-sheet__step-node {
+    animation: none;
   }
 }
 </style>

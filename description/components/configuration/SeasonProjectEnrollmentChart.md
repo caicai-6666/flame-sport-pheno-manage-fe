@@ -1,6 +1,6 @@
 # SeasonProjectEnrollmentChart
 
-`SeasonProjectEnrollmentChart` 使用 Apache ECharts 横向柱状图展示某个赛季中各运动项目的参与人数，当前用于赛季卡片放大后的背面详情。
+`SeasonProjectEnrollmentChart` 使用 Apache ECharts 横向柱状图展示某个赛季中各运动项目的参与人数。目前“全部赛季”卡片已取消翻面，该组件暂不在赛季基本信息页面挂载，保留供后续明确的统计详情场景复用。
 
 > [!IMPORTANT]
 > 一个用户可以在同一赛季锁定多个项目，因此各项目参与人数之和允许大于赛季总参与人数。
@@ -16,7 +16,7 @@
 - 监听放大卡片和视口尺寸变化，自动调整 ECharts 坐标系。
 - 系统启用减少动态效果时关闭图表进入动画。
 
-组件不负责数据请求、用户去重、项目排序或卡片翻转状态。
+组件不负责数据请求、用户去重、项目排序或外层详情状态。
 
 ---
 
@@ -41,7 +41,7 @@
 
 - 图表依赖：`echarts`。
 - 组件代码：`src/components/configuration/SeasonProjectEnrollmentChart.vue`
-- 当前调用方：`src/components/configuration/SeasonBasicConfiguration.vue`
+- 当前调用方：暂无。
 - 赛季管理：`description/features/season-management.md`
 - 项目结构：`description/db/project.md`
 - 赛季项目关系：`description/db/season_user_project.md`

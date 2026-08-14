@@ -1,8 +1,5 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import proofImageOne from '../../assets/test/IMG_5653.PNG'
-import proofImageTwo from '../../assets/test/IMG_5662.PNG'
-import proofImageThree from '../../assets/test/IMG_5663.PNG'
 import {
   exportDynamicJsonTable,
   getDynamicJsonColumns,
@@ -27,7 +24,6 @@ const proofRecords = [
     凭证类型: '普通凭证',
     审核状态: '待终审',
     上传时间: '2026-08-10 21:36',
-    image_url: proofImageOne,
   },
   {
     凭证编号: 'PR-260811-0182',
@@ -38,7 +34,6 @@ const proofRecords = [
     凭证类型: '普通凭证',
     审核状态: '待终审',
     上传时间: '2026-08-10 20:48',
-    image_url: proofImageTwo,
   },
   {
     凭证编号: 'PR-260811-0179',
@@ -49,7 +44,6 @@ const proofRecords = [
     凭证类型: '普通凭证',
     审核状态: '待终审',
     上传时间: '2026-08-10 19:21',
-    image_url: proofImageThree,
   },
   {
     凭证编号: 'PR-260810-0164',
@@ -60,7 +54,6 @@ const proofRecords = [
     凭证类型: '普通凭证',
     审核状态: '终审通过',
     上传时间: '2026-08-09 22:05',
-    image_url: proofImageOne,
   },
 ]
 
@@ -72,7 +65,6 @@ const rejectedRecords = [
     运动日期: '2026-08-06',
     审核状态: '终审拒绝',
     审核意见: '截图中的运动日期与所选日期不一致。',
-    image_url: proofImageTwo,
   },
   {
     用户姓名: '唐意',
@@ -81,7 +73,6 @@ const rejectedRecords = [
     运动日期: '2026-08-03',
     审核状态: '终审拒绝',
     审核意见: '凭证未完整展示距离与运动时长。',
-    image_url: proofImageThree,
   },
 ]
 

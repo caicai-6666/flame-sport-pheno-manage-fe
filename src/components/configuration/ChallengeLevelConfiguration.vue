@@ -1,6 +1,23 @@
 <script setup>
-import { nextTick, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import {
+  getAllProjectLevels,
+  ProjectLevelListRequestError,
+} from '../../api/project-level/projectLevelListApi.js'
+import {
+  createProjectLevel,
+  ProjectLevelCreateRequestError,
+} from '../../api/project-level/projectLevelCreateApi.js'
+import {
+  ProjectLevelRewardUpdateRequestError,
+  updateProjectLevelReward,
+} from '../../api/project-level/projectLevelRewardUpdateApi.js'
 import ChallengeLevelCreateSheet from './ChallengeLevelCreateSheet.vue'
+
+const REWARD_CONFIRMATION_TIMEOUT_MS = 3000
+const MAX_PROJECT_LEVEL_REWARD = 4294967295
+
+const emit = defineEmits(['created'])
 
 const levelPalettePool = [
   ['#9a6548', '#d39a6f', '#5c3928'],
@@ -11,40 +28,67 @@ const levelPalettePool = [
   ['#3f8c7b', '#80c5aa', '#28584e'],
 ]
 
-// 当前使用数据库文档中的示例等级；接入接口后由页面层适配为相同展示结构。
-const challengeLevels = ref([
-  {
-    id: 1,
-    name: '青铜',
-    reward: 100,
-    palette: levelPalettePool[0],
-  },
-  {
-    id: 2,
-    name: '白银',
-    reward: 200,
-    palette: levelPalettePool[1],
-  },
-  {
-    id: 3,
-    name: '黄金',
-    reward: 300,
-    palette: levelPalettePool[2],
-  },
-])
+const challengeLevels = ref([])
+const isLevelListLoading = ref(true)
+const levelListError = ref('')
 
 const configurationRef = ref(null)
 const editingLevelId = ref(null)
 const rewardDraft = ref('')
 const validationMessage = ref('')
+const isRewardConfirmationActive = ref(false)
+const isRewardUpdating = ref(false)
+const rewardUpdateError = ref('')
 const isCreateSheetOpen = ref(false)
+const isLevelCreating = ref(false)
+const levelCreateError = ref('')
 
-let nextLocalLevelId = Math.max(...challengeLevels.value.map((level) => level.id)) + 1
+let levelListRequestController
+let levelCreateRequestController
+let levelRewardUpdateRequestController
+let rewardConfirmationTimerId = 0
+
+function createChallengeLevelView(level) {
+  return {
+    ...level,
+    palette: levelPalettePool[(level.id - 1) % levelPalettePool.length],
+  }
+}
+
+async function loadChallengeLevels() {
+  levelListRequestController?.abort()
+  const requestController = new AbortController()
+  levelListRequestController = requestController
+  isLevelListLoading.value = true
+  levelListError.value = ''
+  closeRewardEditor()
+
+  try {
+    const levels = await getAllProjectLevels({ signal: requestController.signal })
+    if (levelListRequestController !== requestController) return
+
+    challengeLevels.value = levels.map(createChallengeLevelView)
+  } catch (error) {
+    if (error?.name === 'AbortError') return
+    challengeLevels.value = []
+    levelListError.value = error instanceof ProjectLevelListRequestError
+      ? error.message
+      : '挑战等级列表获取失败，请稍后重试'
+  } finally {
+    if (levelListRequestController === requestController) {
+      levelListRequestController = null
+      isLevelListLoading.value = false
+    }
+  }
+}
 
 async function openRewardEditor(level) {
+  if (isRewardUpdating.value) return
   editingLevelId.value = level.id
   rewardDraft.value = String(level.reward)
   validationMessage.value = ''
+  rewardUpdateError.value = ''
+  clearRewardConfirmation()
 
   await nextTick()
   const input = configurationRef.value?.querySelector(`[data-level-id="${level.id}"] input`)
@@ -52,55 +96,145 @@ async function openRewardEditor(level) {
   input?.select()
 }
 
+function clearRewardConfirmation() {
+  window.clearTimeout(rewardConfirmationTimerId)
+  rewardConfirmationTimerId = 0
+  isRewardConfirmationActive.value = false
+}
+
 function closeRewardEditor() {
+  if (isRewardUpdating.value) return
+  clearRewardConfirmation()
   editingLevelId.value = null
   rewardDraft.value = ''
   validationMessage.value = ''
+  rewardUpdateError.value = ''
 }
 
-function saveReward(level) {
+function handleRewardDraftInput() {
+  clearRewardConfirmation()
+  validationMessage.value = ''
+  rewardUpdateError.value = ''
+}
+
+async function saveReward(level) {
+  if (isRewardUpdating.value) return
   const normalizedReward = Number(rewardDraft.value)
 
   if (
     rewardDraft.value === '' ||
     !Number.isSafeInteger(normalizedReward) ||
-    normalizedReward < 0
+    normalizedReward < 0 ||
+    normalizedReward > MAX_PROJECT_LEVEL_REWARD
   ) {
-    validationMessage.value = '奖励积分必须是非负整数'
+    clearRewardConfirmation()
+    validationMessage.value = `奖励积分必须是 0～${MAX_PROJECT_LEVEL_REWARD} 的整数`
     return
   }
 
-  // 原型阶段只更新当前页面状态；接入接口后应在请求成功后再同步展示值。
-  level.reward = normalizedReward
-  closeRewardEditor()
+  validationMessage.value = ''
+  rewardUpdateError.value = ''
+  if (!isRewardConfirmationActive.value) {
+    isRewardConfirmationActive.value = true
+    rewardConfirmationTimerId = window.setTimeout(
+      clearRewardConfirmation,
+      REWARD_CONFIRMATION_TIMEOUT_MS,
+    )
+    return
+  }
+
+  clearRewardConfirmation()
+  const requestController = new AbortController()
+  levelRewardUpdateRequestController = requestController
+  isRewardUpdating.value = true
+
+  try {
+    const updatedLevel = await updateProjectLevelReward(level.id, normalizedReward, {
+      signal: requestController.signal,
+    })
+    if (levelRewardUpdateRequestController !== requestController) return
+
+    // 只采用服务端确认的结果，并恢复列表约定的积分、主键升序。
+    level.name = updatedLevel.name
+    level.reward = updatedLevel.reward
+    isRewardUpdating.value = false
+    levelRewardUpdateRequestController = null
+    closeRewardEditor()
+    challengeLevels.value = [...challengeLevels.value].sort(
+      (left, right) => left.reward - right.reward || left.id - right.id,
+    )
+  } catch (error) {
+    if (error?.name === 'AbortError') return
+    rewardUpdateError.value = error instanceof ProjectLevelRewardUpdateRequestError
+      ? error.message
+      : '挑战等级奖励积分修改失败，请稍后重试'
+  } finally {
+    if (levelRewardUpdateRequestController === requestController) {
+      levelRewardUpdateRequestController = null
+      isRewardUpdating.value = false
+    }
+  }
 }
 
 function openCreateSheet() {
+  if (isRewardUpdating.value || isLevelListLoading.value || levelListError.value) return
   closeRewardEditor()
+  levelCreateError.value = ''
   isCreateSheetOpen.value = true
 }
 
 function closeCreateSheet() {
+  if (isLevelCreating.value) return
+  levelCreateError.value = ''
   isCreateSheetOpen.value = false
 }
 
-function createChallengeLevel(payload) {
-  const localId = nextLocalLevelId
-  nextLocalLevelId += 1
+async function handleCreateSubmit(payload) {
+  if (isLevelCreating.value) return
 
-  const newLevel = {
-    id: localId,
-    name: payload.name,
-    reward: payload.reward,
-    palette: levelPalettePool[(localId - 1) % levelPalettePool.length],
-  }
+  const requestController = new AbortController()
+  levelCreateRequestController = requestController
+  isLevelCreating.value = true
+  levelCreateError.value = ''
 
-  // 奖励积分同时承担等级展示顺序，新增后按积分从低到高重新排列。
-  challengeLevels.value = [...challengeLevels.value, newLevel].sort(
+  try {
+    const createdLevel = await createProjectLevel(payload, { signal: requestController.signal })
+    if (levelCreateRequestController !== requestController) return
+    if (challengeLevels.value.some((level) => level.id === createdLevel.id)) {
+      throw new ProjectLevelCreateRequestError('新增挑战等级接口返回了重复等级主键')
+    }
+
+    // 只在服务端确认创建后插入卡片，并恢复列表接口约定的积分、主键升序。
+    challengeLevels.value = [
+      ...challengeLevels.value,
+      createChallengeLevelView(createdLevel),
+    ].sort(
     (left, right) => left.reward - right.reward || left.id - right.id,
   )
-  closeCreateSheet()
+    // 通知同一平台配置下的运动项目页使等级快照失效，规则仍保持按项目打开后加载。
+    emit('created', createdLevel)
+    isCreateSheetOpen.value = false
+  } catch (error) {
+    if (error?.name === 'AbortError') return
+    levelCreateError.value = error instanceof ProjectLevelCreateRequestError
+      ? error.message
+      : '挑战等级创建失败，请稍后重试'
+  } finally {
+    if (levelCreateRequestController === requestController) {
+      levelCreateRequestController = null
+      isLevelCreating.value = false
+    }
+  }
 }
+
+onMounted(loadChallengeLevels)
+
+onBeforeUnmount(() => {
+  clearRewardConfirmation()
+  levelListRequestController?.abort()
+  levelCreateRequestController?.abort()
+  levelRewardUpdateRequestController?.abort()
+})
 </script>
 
 <template>
@@ -112,13 +246,16 @@ function createChallengeLevel(payload) {
     <div class="challenge-level-configuration__scroll" :inert="isCreateSheetOpen">
       <header class="challenge-level-configuration__header">
         <h2>全部等级</h2>
-        <span>{{ challengeLevels.length }} 个等级</span>
+        <span v-if="isLevelListLoading">正在同步</span>
+        <span v-else-if="levelListError">同步失败</span>
+        <span v-else>{{ challengeLevels.length }} 个等级</span>
       </header>
 
       <div class="challenge-level-configuration__grid">
         <button
           type="button"
           class="challenge-level-create-card"
+          :disabled="isLevelListLoading || Boolean(levelListError)"
           aria-label="新建挑战等级"
           @click="openCreateSheet"
         >
@@ -129,6 +266,36 @@ function createChallengeLevel(payload) {
           </span>
           <strong>新建等级</strong>
         </button>
+
+        <div
+          v-if="isLevelListLoading"
+          class="challenge-level-configuration__state"
+          role="status"
+          aria-live="polite"
+        >
+          <span class="challenge-level-configuration__spinner" aria-hidden="true"></span>
+          <strong>正在获取挑战等级</strong>
+          <small>请稍候…</small>
+        </div>
+
+        <div
+          v-else-if="levelListError"
+          class="challenge-level-configuration__state is-error"
+          role="alert"
+        >
+          <strong>{{ levelListError }}</strong>
+          <small>重新同步后可继续管理等级</small>
+          <button type="button" @click="loadChallengeLevels">重新加载</button>
+        </div>
+
+        <div
+          v-else-if="!challengeLevels.length"
+          class="challenge-level-configuration__state is-empty"
+          role="status"
+        >
+          <strong>暂无挑战等级</strong>
+          <small>可以从左侧的新建入口创建第一个等级</small>
+        </div>
 
         <article
           v-for="(level, index) in challengeLevels"
@@ -173,10 +340,11 @@ function createChallengeLevel(payload) {
             <form
               class="challenge-level-card__side challenge-level-card__editor"
               :aria-label="`修改${level.name}等级奖励积分`"
+              :aria-busy="isRewardUpdating && editingLevelId === level.id"
               :aria-hidden="editingLevelId !== level.id"
               :inert="editingLevelId !== level.id"
               @submit.prevent="saveReward(level)"
-              @keydown.esc.prevent="closeRewardEditor"
+              @keydown.esc.prevent="isRewardConfirmationActive ? clearRewardConfirmation() : closeRewardEditor()"
             >
               <header class="challenge-level-card__editor-header">
                 <span aria-hidden="true">
@@ -201,19 +369,76 @@ function createChallengeLevel(payload) {
                     step="1"
                     inputmode="numeric"
                     aria-label="奖励积分"
-                    @input="validationMessage = ''"
+                    :disabled="isRewardUpdating"
+                    @input="handleRewardDraftInput"
                   />
                   <small>积分</small>
                 </span>
               </label>
 
-              <p :class="{ 'is-visible': validationMessage }" role="alert">
-                {{ validationMessage || '奖励积分必须是非负整数' }}
+              <p
+                :class="{
+                  'is-visible': validationMessage || rewardUpdateError,
+                  'is-confirming': isRewardConfirmationActive,
+                  'is-updating': isRewardUpdating,
+                }"
+                role="status"
+                aria-live="polite"
+              >
+                <Transition name="challenge-level-editor-feedback" mode="out-in">
+                  <span
+                    :key="validationMessage || rewardUpdateError || isRewardUpdating || isRewardConfirmationActive"
+                  >
+                    {{
+                      validationMessage
+                        || rewardUpdateError
+                        || (isRewardUpdating
+                          ? '正在保存新的奖励积分…'
+                          : isRewardConfirmationActive
+                            ? '请在 3 秒内再次确认'
+                            : '输入新的奖励积分')
+                    }}
+                  </span>
+                </Transition>
               </p>
 
               <footer class="challenge-level-card__actions">
-                <button type="button" @click="closeRewardEditor">返回</button>
-                <button type="submit">保存修改</button>
+                <button type="button" :disabled="isRewardUpdating" @click="closeRewardEditor">
+                  返回
+                </button>
+                <button
+                  type="submit"
+                  class="challenge-level-card__save"
+                  :class="{
+                    'is-confirming': isRewardConfirmationActive,
+                    'is-updating': isRewardUpdating,
+                  }"
+                  :disabled="isRewardUpdating"
+                  :aria-pressed="isRewardConfirmationActive"
+                >
+                  <span class="challenge-level-card__save-copy">
+                    <span
+                      class="challenge-level-card__save-label is-default"
+                      :aria-hidden="isRewardConfirmationActive || isRewardUpdating"
+                    >保存修改</span>
+                    <span
+                      class="challenge-level-card__save-label is-confirm"
+                      :aria-hidden="!isRewardConfirmationActive || isRewardUpdating"
+                    >确认保存</span>
+                    <span
+                      class="challenge-level-card__save-label is-loading"
+                      :aria-hidden="!isRewardUpdating"
+                    >
+                      <span class="challenge-level-card__save-spinner" aria-hidden="true"></span>
+                      保存中
+                    </span>
+                  </span>
+                  <span
+                    v-if="isRewardConfirmationActive"
+                    class="challenge-level-card__save-progress"
+                    aria-hidden="true"
+                  ></span>
+                </button>
               </footer>
             </form>
           </div>
@@ -225,8 +450,11 @@ function createChallengeLevel(payload) {
       <ChallengeLevelCreateSheet
         v-if="isCreateSheetOpen"
         :existing-names="challengeLevels.map((level) => level.name)"
+        :submitting="isLevelCreating"
+        :submit-error="levelCreateError"
         @cancel="closeCreateSheet"
-        @submit="createChallengeLevel"
+        @clear-error="levelCreateError = ''"
+        @submit="handleCreateSubmit"
       />
     </Transition>
   </section>
@@ -279,6 +507,55 @@ function createChallengeLevel(payload) {
   display: grid;
   gap: clamp(15px, 1.5vw, 22px);
   grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr));
+}
+
+.challenge-level-configuration__state {
+  display: grid;
+  min-height: 248px;
+  padding: 28px;
+  color: #68746d;
+  text-align: center;
+  background: rgb(255 255 255 / 48%);
+  border: 1px solid rgb(255 255 255 / 74%);
+  border-radius: 26px;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 82%);
+  gap: 8px;
+  place-content: center;
+}
+
+.challenge-level-configuration__state strong {
+  color: #45524b;
+  font-size: 14px;
+}
+
+.challenge-level-configuration__state small {
+  max-width: 240px;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.challenge-level-configuration__state button {
+  min-height: 36px;
+  margin: 5px auto 0;
+  padding: 0 15px;
+  color: #3f8395;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 720;
+  background: rgb(76 145 165 / 10%);
+  border: 1px solid rgb(76 145 165 / 16%);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.challenge-level-configuration__spinner {
+  width: 27px;
+  height: 27px;
+  margin: 0 auto 4px;
+  border: 2px solid rgb(76 145 165 / 13%);
+  border-top-color: #4e96aa;
+  border-radius: 50%;
+  animation: challenge-level-list-loading 780ms linear infinite;
 }
 
 .challenge-level-create-card {
@@ -348,6 +625,12 @@ function createChallengeLevel(payload) {
 .challenge-level-create-card:focus-visible {
   outline: 3px solid rgb(76 145 165 / 28%);
   outline-offset: 3px;
+}
+
+.challenge-level-create-card:disabled {
+  cursor: not-allowed;
+  filter: saturate(0.55);
+  opacity: 0.55;
 }
 
 .challenge-level-card {
@@ -626,6 +909,7 @@ function createChallengeLevel(payload) {
 }
 
 .challenge-level-card__editor > p {
+  position: relative;
   min-height: 14px;
   margin: 5px 1px 4px;
   color: #bf5f58;
@@ -635,8 +919,39 @@ function createChallengeLevel(payload) {
   transition: opacity 220ms ease;
 }
 
+.challenge-level-card__editor > p > span {
+  display: block;
+}
+
 .challenge-level-card__editor > p.is-visible {
   opacity: 1;
+}
+
+.challenge-level-card__editor > p.is-confirming {
+  color: var(--level-primary);
+  opacity: 1;
+}
+
+.challenge-level-card__editor > p.is-updating {
+  color: #60716a;
+  opacity: 1;
+}
+
+.challenge-level-editor-feedback-enter-active,
+.challenge-level-editor-feedback-leave-active {
+  transition:
+    opacity 180ms ease,
+    transform 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.challenge-level-editor-feedback-enter-from {
+  opacity: 0;
+  transform: translateY(5px);
+}
+
+.challenge-level-editor-feedback-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
 }
 
 .challenge-level-card__actions {
@@ -647,6 +962,7 @@ function createChallengeLevel(payload) {
 }
 
 .challenge-level-card__actions button {
+  position: relative;
   height: 37px;
   color: #65716a;
   font: inherit;
@@ -663,11 +979,86 @@ function createChallengeLevel(payload) {
     transform 320ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.challenge-level-card__actions button[type='submit'] {
+.challenge-level-card__actions button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.challenge-level-card__save {
+  isolation: isolate;
+  overflow: hidden;
   color: #fff;
   background: linear-gradient(135deg, var(--level-primary), var(--level-secondary));
   border-color: color-mix(in srgb, var(--level-primary) 25%, transparent);
   box-shadow: 0 8px 18px color-mix(in srgb, var(--level-primary) 20%, transparent);
+  transition:
+    background 420ms ease,
+    border-color 420ms ease,
+    box-shadow 420ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 420ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.challenge-level-card__save.is-confirming {
+  color: var(--level-ink);
+  background:
+    linear-gradient(135deg, rgb(255 255 255 / 88%), rgb(255 255 255 / 66%)),
+    var(--level-secondary);
+  border-color: color-mix(in srgb, var(--level-primary) 32%, white);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--level-primary) 9%, transparent),
+    0 10px 22px color-mix(in srgb, var(--level-primary) 19%, transparent);
+  transform: translateY(-1px) scale(1.025);
+}
+
+.challenge-level-card__save-copy {
+  position: relative;
+  z-index: 2;
+  display: block;
+  height: 17px;
+}
+
+.challenge-level-card__save-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(7px) scale(0.97);
+  transition:
+    opacity 210ms ease,
+    transform 360ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.challenge-level-card__save:not(.is-confirming, .is-updating) .is-default,
+.challenge-level-card__save.is-confirming .is-confirm,
+.challenge-level-card__save.is-updating .is-loading {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.challenge-level-card__save-spinner {
+  width: 12px;
+  height: 12px;
+  margin-right: 6px;
+  border: 1.5px solid rgb(255 255 255 / 35%);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: challenge-level-reward-updating 680ms linear infinite;
+}
+
+.challenge-level-card__save-progress {
+  position: absolute;
+  z-index: 1;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: var(--level-primary);
+  border-radius: 999px;
+  transform-origin: left center;
+  animation: challenge-level-reward-confirmation 3s linear forwards;
 }
 
 @keyframes challenge-level-card-enter {
@@ -678,8 +1069,26 @@ function createChallengeLevel(payload) {
   }
 }
 
+@keyframes challenge-level-list-loading {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes challenge-level-reward-updating {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes challenge-level-reward-confirmation {
+  to {
+    transform: scaleX(0);
+  }
+}
+
 @media (hover: hover) {
-  .challenge-level-create-card:hover {
+  .challenge-level-create-card:not(:disabled):hover {
     color: #3d7786;
     background:
       radial-gradient(circle at 50% 42%, rgb(76 158 184 / 17%), transparent 37%),
@@ -691,7 +1100,7 @@ function createChallengeLevel(payload) {
     transform: translateY(-7px) scale(1.018);
   }
 
-  .challenge-level-create-card:hover .challenge-level-create-card__plus {
+  .challenge-level-create-card:not(:disabled):hover .challenge-level-create-card__plus {
     box-shadow:
       inset 0 1px 0 rgb(255 255 255 / 94%),
       0 16px 30px rgb(56 116 132 / 17%);
@@ -733,6 +1142,15 @@ function createChallengeLevel(payload) {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .challenge-level-configuration__spinner {
+    animation: none;
+  }
+
+  .challenge-level-card__save-spinner,
+  .challenge-level-card__save-progress {
+    animation: none;
+  }
+
   .challenge-level-card {
     opacity: 1;
     translate: 0 0;
@@ -753,7 +1171,10 @@ function createChallengeLevel(payload) {
   .challenge-level-card__side,
   .challenge-level-card__face::before,
   .challenge-level-card__medal,
-  .challenge-level-card__actions button {
+  .challenge-level-card__actions button,
+  .challenge-level-card__save-label,
+  .challenge-level-editor-feedback-enter-active,
+  .challenge-level-editor-feedback-leave-active {
     transition: none;
   }
 

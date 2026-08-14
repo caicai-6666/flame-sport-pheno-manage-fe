@@ -18,11 +18,12 @@
 
 ## Props
 
-| 名称 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `modelValue` | `String \| Number` | 是 | 当前选中值 |
-| `options` | `Array` | 是 | 选项数组，每项包含 `value` 和 `label` |
-| `ariaLabel` | `String` | 是 | 滚轮的无障碍名称及选项标识前缀 |
+| 名称 | 类型 | 必填 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `modelValue` | `String \| Number` | 是 | 无 | 当前选中值 |
+| `options` | `Array` | 是 | 无 | 选项数组，每项包含 `value` 和 `label` |
+| `ariaLabel` | `String` | 是 | 无 | 滚轮的无障碍名称及选项标识前缀 |
+| `disabled` | `Boolean` | 否 | `false` | 禁止滚动、点击和键盘改变选项，并从 Tab 顺序中移除 |
 
 ## 事件
 

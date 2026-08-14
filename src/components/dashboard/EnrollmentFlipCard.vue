@@ -1,5 +1,7 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+
+const FLIP_FOCUS_FALLBACK_MS = 820
 
 const props = defineProps({
   title: {
@@ -27,15 +29,97 @@ const props = defineProps({
     default: 'compact',
     validator: (value) => ['compact', 'wide'].includes(value),
   },
+  detailLoading: {
+    type: Boolean,
+    default: false,
+  },
+  detailError: {
+    type: String,
+    default: '',
+  },
+  emptyMessage: {
+    type: String,
+    default: '暂无报名人员',
+  },
 })
 
-const emit = defineEmits(['back'])
+const emit = defineEmits(['back', 'retry', 'focus-ready'])
 
 const isFlipped = computed(() => Boolean(props.selectedName))
 const selectedItem = computed(() =>
   props.items.find((item) => item.name === props.selectedName),
 )
 const selectedMembers = computed(() => props.membersByItem[props.selectedName] ?? [])
+const visibleMembers = computed(() =>
+  props.detailLoading || props.detailError ? [] : selectedMembers.value,
+)
+const readyAvatarIds = ref(new Set())
+const failedAvatarIds = ref(new Set())
+let focusFallbackTimer = null
+let lastFocusedName = ''
+
+// 头像加载失败时露出下层的姓名首字，避免无效图片地址留下破图图标。
+function handleAvatarError(memberId) {
+  failedAvatarIds.value = new Set(failedAvatarIds.value).add(memberId)
+}
+
+function handleAvatarLoad(memberId) {
+  readyAvatarIds.value = new Set(readyAvatarIds.value).add(memberId)
+}
+
+function clearFocusFallback() {
+  if (focusFallbackTimer === null) return
+
+  window.clearTimeout(focusFallbackTimer)
+  focusFallbackTimer = null
+}
+
+function emitFocusReady() {
+  if (!isFlipped.value || !selectedItem.value || lastFocusedName === props.selectedName) return
+
+  lastFocusedName = props.selectedName
+  emit('focus-ready', selectedItem.value)
+}
+
+function handleFlipTransitionEnd(event) {
+  if (
+    event.target !== event.currentTarget
+    || event.propertyName !== 'transform'
+    || !isFlipped.value
+    || !selectedItem.value
+  ) {
+    return
+  }
+
+  // 只有原卡片完整翻到背面后才通知工作台放大，避免中途改变 3D 上下文破坏名单布局。
+  clearFocusFallback()
+  emitFocusReady()
+}
+
+watch(
+  () => props.selectedName,
+  async (selectedName) => {
+    clearFocusFallback()
+    lastFocusedName = ''
+    if (!selectedName || typeof window === 'undefined') return
+
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      await nextTick()
+      emitFocusReady()
+      return
+    }
+
+    // transitionend 可能因标签页切换或浏览器取消动画而丢失，超时兜底仍等待完整翻面时长。
+    focusFallbackTimer = window.setTimeout(() => {
+      focusFallbackTimer = null
+      emitFocusReady()
+    }, FLIP_FOCUS_FALLBACK_MS)
+  },
+)
+
+onBeforeUnmount(() => {
+  if (typeof window !== 'undefined') clearFocusFallback()
+})
 </script>
 
 <template>
@@ -47,7 +131,7 @@ const selectedMembers = computed(() => props.membersByItem[props.selectedName] ?
     ]"
     :aria-label="`${title}卡片`"
   >
-    <div class="enrollment-flip-card__inner">
+    <div class="enrollment-flip-card__inner" @transitionend="handleFlipTransitionEnd">
       <div class="enrollment-flip-card__face enrollment-flip-card__front" :inert="isFlipped">
         <h2>{{ title }}</h2>
         <slot></slot>
@@ -71,19 +155,55 @@ const selectedMembers = computed(() => props.membersByItem[props.selectedName] ?
           </div>
         </header>
 
-        <ul class="enrollment-flip-card__members">
-          <li v-if="selectedMembers.length === 0" class="enrollment-flip-card__empty">
-            暂无报名人员
-          </li>
-          <li v-for="member in selectedMembers" :key="member.id">
-            <span class="enrollment-flip-card__avatar">{{ member.name.slice(0, 1) }}</span>
-            <span class="enrollment-flip-card__member-copy">
-              <strong>{{ member.name }}</strong>
-              <small>{{ member.department }}</small>
-            </span>
-            <time>{{ member.participatedAt }}</time>
-          </li>
-        </ul>
+        <!-- 项目报名需要展示额外业务字段，因此允许调用方替换详情区域，默认仍保留等级名单。 -->
+        <slot
+          name="detail"
+          :selected-item="selectedItem"
+          :selected-members="selectedMembers"
+          :visible-members="visibleMembers"
+        >
+          <ul class="enrollment-flip-card__members">
+            <li v-if="detailLoading" class="enrollment-flip-card__empty" aria-live="polite">
+              <span class="enrollment-flip-card__loading-mark" aria-hidden="true"></span>
+              <span>正在获取用户详细信息…</span>
+            </li>
+            <li v-else-if="detailError" class="enrollment-flip-card__empty" aria-live="polite">
+              <span>{{ detailError }}</span>
+              <button type="button" @click="emit('retry')">重新加载</button>
+            </li>
+            <li v-else-if="selectedMembers.length === 0" class="enrollment-flip-card__empty">
+              {{ emptyMessage }}
+            </li>
+            <li v-for="member in visibleMembers" :key="member.id">
+              <span
+                class="enrollment-flip-card__avatar"
+                :class="{
+                  'is-pending': member.avatarUrl && !member.avatarObjectUrl && !member.avatarLoadFailed,
+                  'is-resolving': member.avatarObjectUrl,
+                  'is-ready': readyAvatarIds.has(member.id),
+                  'is-failed': member.avatarLoadFailed || failedAvatarIds.has(member.id),
+                }"
+              >
+                <span>{{ member.name.slice(0, 1) }}</span>
+                <img
+                  v-if="member.avatarObjectUrl"
+                  :src="member.avatarObjectUrl"
+                  alt=""
+                  loading="lazy"
+                  @load="handleAvatarLoad(member.id)"
+                  @error="handleAvatarError(member.id)"
+                />
+              </span>
+              <span class="enrollment-flip-card__member-copy">
+                <strong>{{ member.name }}</strong>
+                <small v-if="member.detail || member.department">
+                  {{ member.detail || member.department }}
+                </small>
+              </span>
+              <time v-if="member.participatedAt">{{ member.participatedAt }}</time>
+            </li>
+          </ul>
+        </slot>
       </div>
     </div>
   </section>
@@ -214,10 +334,13 @@ const selectedMembers = computed(() => props.membersByItem[props.selectedName] ?
 
 .enrollment-flip-card__members {
   display: grid;
+  min-height: 0;
   margin: 18px -5px 0 0;
   padding: 0 5px 0 0;
   overflow-y: auto;
   overscroll-behavior: contain;
+  align-content: start;
+  flex: 1;
   gap: 7px;
   list-style: none;
   scrollbar-color: rgb(99 111 104 / 22%) transparent;
@@ -241,6 +364,7 @@ const selectedMembers = computed(() => props.membersByItem[props.selectedName] ?
 }
 
 .enrollment-flip-card__avatar {
+  position: relative;
   display: grid;
   width: 40px;
   height: 40px;
@@ -249,7 +373,77 @@ const selectedMembers = computed(() => props.membersByItem[props.selectedName] ?
   font-weight: 750;
   background: linear-gradient(145deg, #8a7ee0, #52b79c);
   border-radius: 14px;
+  overflow: hidden;
   place-items: center;
+}
+
+.enrollment-flip-card__avatar > span {
+  transition:
+    filter 480ms ease,
+    opacity 480ms ease;
+}
+
+.enrollment-flip-card__avatar::after {
+  position: absolute;
+  z-index: 2;
+  inset: 9px;
+  border: 2px solid rgb(255 255 255 / 32%);
+  border-top-color: rgb(255 255 255 / 92%);
+  border-radius: 50%;
+  content: '';
+  opacity: 0;
+  pointer-events: none;
+}
+
+.enrollment-flip-card__avatar:is(.is-pending, .is-resolving):not(.is-ready, .is-failed)::after {
+  opacity: 1;
+  animation: enrollment-avatar-loading 760ms linear infinite;
+}
+
+.enrollment-flip-card__avatar:is(.is-pending, .is-resolving):not(.is-ready, .is-failed) > span {
+  filter: blur(1.5px);
+  opacity: 0.42;
+}
+
+.enrollment-flip-card__avatar img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  filter: blur(13px);
+  object-fit: cover;
+  opacity: 0;
+  transform: scale(1.14);
+  transition:
+    filter 880ms cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 620ms ease,
+    transform 880ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.enrollment-flip-card__avatar.is-ready img {
+  filter: blur(0);
+  opacity: 1;
+  transform: scale(1);
+}
+
+.enrollment-flip-card__avatar.is-ready > span {
+  filter: blur(3px);
+  opacity: 0;
+}
+
+.enrollment-flip-card__avatar.is-failed > span {
+  filter: none;
+  opacity: 1;
+}
+
+.enrollment-flip-card__avatar.is-failed img {
+  display: none;
+}
+
+@keyframes enrollment-avatar-loading {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .enrollment-flip-card__member-copy {
@@ -277,11 +471,39 @@ const selectedMembers = computed(() => props.membersByItem[props.selectedName] ?
 }
 
 .enrollment-flip-card__members .enrollment-flip-card__empty {
+  display: flex;
   color: #8b948f;
   font-size: 12px;
+  flex-direction: column;
+  gap: 10px;
   grid-column: 1 / -1;
-  grid-template-columns: 1fr;
-  place-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.enrollment-flip-card__empty button {
+  padding: 7px 12px;
+  color: #6558bc;
+  font: inherit;
+  font-weight: 700;
+  background: rgb(121 107 218 / 10%);
+  border: 1px solid rgb(121 107 218 / 16%);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.enrollment-flip-card__empty button:focus-visible {
+  outline: 3px solid rgb(112 99 216 / 28%);
+  outline-offset: 2px;
+}
+
+.enrollment-flip-card__loading-mark {
+  width: 24px;
+  height: 24px;
+  border: 2px solid rgb(121 107 218 / 14%);
+  border-top-color: #796bda;
+  border-radius: 50%;
+  animation: enrollment-avatar-loading 760ms linear infinite;
 }
 
 @media (hover: hover) {
@@ -321,6 +543,16 @@ const selectedMembers = computed(() => props.membersByItem[props.selectedName] ?
   .enrollment-flip-card__inner,
   .enrollment-flip-card__back-head button,
   .enrollment-flip-card__back-head svg {
+    transition: none;
+  }
+
+  .enrollment-flip-card__avatar::after,
+  .enrollment-flip-card__loading-mark {
+    animation: none;
+  }
+
+  .enrollment-flip-card__avatar img,
+  .enrollment-flip-card__avatar > span {
     transition: none;
   }
 

@@ -1,14 +1,14 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import scaleIcon from '../../assets/icon/重量.png'
-import tableTennisIcon from '../../assets/icon/乒乓球.png'
-import fitnessIcon from '../../assets/icon/健身.png'
-import dumbbellIcon from '../../assets/icon/健身房.png'
-import teamIcon from '../../assets/icon/组队.png'
-import tennisIcon from '../../assets/icon/网球.png'
-import cyclingIcon from '../../assets/icon/自行车赛车.png'
-import runningIcon from '../../assets/icon/跑步.png'
-import weightIcon from '../../assets/icon/运动-22.png'
+import scaleIcon from '../../assets/icon/重量.webp'
+import tableTennisIcon from '../../assets/icon/乒乓球.webp'
+import fitnessIcon from '../../assets/icon/健身.webp'
+import dumbbellIcon from '../../assets/icon/健身房.webp'
+import teamIcon from '../../assets/icon/组队.webp'
+import tennisIcon from '../../assets/icon/网球.webp'
+import cyclingIcon from '../../assets/icon/自行车赛车.webp'
+import runningIcon from '../../assets/icon/跑步.webp'
+import weightIcon from '../../assets/icon/运动-22.webp'
 
 const props = defineProps({
   repelRadius: {

@@ -1,38 +1,35 @@
 # ChallengeLevelEnrollmentCard
 
-`ChallengeLevelEnrollmentCard` 将挑战等级报名饼状图与等级报名人员列表组合为一张可翻转的双面卡片。
+`ChallengeLevelEnrollmentCard` 展示挑战等级报名饼状图，并在点击等级时请求工作台打开独立的报名人员详情。
 
 > [!IMPORTANT]
-> 当前人员姓名、部门和报名日期均为视觉原型占位数据。真实列表必须根据当前赛季和所选等级从后端接口分页获取。
+> 当前赛季接口返回正式参赛记录 ID、用户 ID 和等级信息。组件在管理员点击等级后提交两类 ID；页面使用用户 ID 按需查询用户详情，并为后续参赛记录查询保留 `season_user.id`。
 
 ---
 
 ## 组件职责
 
-- 正面展示各挑战等级报名人数饼状图。
-- 接收饼状图的等级点击事件，并沿 Y 轴翻转到卡片背面。
-- 背面展示所选等级的报名人员姓名、部门和报名日期。
-- 复用 `EnrollmentFlipCard` 的人员列表、返回按钮、翻转状态和无障碍处理。
+- 展示各挑战等级报名人数饼状图，点击后原卡片始终保持统计正面。
+- 接收饼状图的等级点击事件，提交等级名称、对应用户 ID 与参赛记录 ID。
+- 请求工作台打开独立的居中大尺寸名单。
+- 请求期间展示加载状态，无赛季或无人报名时展示空状态。
 
-组件不负责请求接口、筛选正式参与用户或实现服务端分页。
+组件不负责请求接口或筛选正式参与用户，正式参赛口径完全由调用方传入的数据决定。人员详情由工作台聚焦层使用共享模型渲染。
 
 ---
 
 ## 使用方式
 
 ```vue
-<script setup>
-import ChallengeLevelEnrollmentCard from './components/dashboard/ChallengeLevelEnrollmentCard.vue'
-
-const items = [{ name: '青铜', value: 486, color: '#8275df' }]
-const membersByLevel = {
-  青铜: [{ id: 'user-1', name: '张三', department: '产品体验', participatedAt: '08.02' }],
-}
-</script>
-
-<template>
-  <ChallengeLevelEnrollmentCard :items="items" :members-by-level="membersByLevel" />
-</template>
+<ChallengeLevelEnrollmentCard
+  :items="levelEnrollments"
+  :members-by-level="levelEnrollmentMembers"
+  :user-ids-by-level="levelEnrollmentUserIds"
+  :season-user-ids-by-level="levelEnrollmentSeasonUserIds"
+  :loading="isSeasonLoading"
+  @select="handleLevelSelected"
+  @focus-ready="handleEnrollmentFocusReady"
+/>
 ```
 
 ## Props
@@ -40,37 +37,44 @@ const membersByLevel = {
 | 名称 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `items` | `Array` | 是 | 等级统计数组，每项包含 `name`、`value` 和 `color` |
-| `membersByLevel` | `Object` | 是 | 以等级名称为键的报名人员数组映射 |
+| `membersByLevel` | `Object` | 是 | 以等级名称为键的报名人员数组映射，供工作台共享 |
+| `userIdsByLevel` | `Object` | 是 | 以等级名称为键的正式参赛用户 ID 数组映射 |
+| `seasonUserIdsByLevel` | `Object` | 是 | 以等级名称为键的 `season_user.id` 数组映射 |
+| `loading` | `Boolean` | 否 | 是否正在获取当前赛季；默认为 `false` |
 
 ## 事件
 
-当前未提供。
+| 事件名 | 参数 | 触发时机 |
+| --- | --- | --- |
+| `select` | `{ name, userIds, seasonUserIds }` | 点击等级扇区时 |
+| `focus-ready` | `{ type: 'level', item }` | 点击等级后，请求工作台打开大尺寸等级名单 |
 
 ## 插槽与暴露方法
 
-当前未提供。
+当前未提供插槽或暴露方法。
 
 ---
 
 ## 状态与交互
 
-组件内部使用 `selectedLevelName` 保存当前查看的等级，并将该状态交给 `EnrollmentFlipCard`。值为空时显示图表正面；点击扇区后写入等级名称并翻转到背面；点击返回按钮后清空该值并翻回正面。
+组件不保存本地翻面状态。点击扇区时先通知页面按需加载人员资料，再通知聚焦层使用同一份响应式模型打开独立名单，因此原饼图卡不会翻面或重排。
 
-人员列表使用较大的头像、姓名字号和独立条目间距。列表位于固定高度卡片内，内容超出时只滚动列表区域，不改变工作台网格尺寸。
+聚焦层打开后立即显示人员加载状态。页面允许已发起的查询在后台完成并写入缓存，再次打开相同等级时直接使用缓存结果。
 
 ## 数据关系
 
-真实人员列表需要以当前 `season_id` 和所选 `level_id` 查询 `season_user`，再通过 `user_id` 关联用户及其部门。只有满足后端正式报名口径的记录才能进入列表，前端不得仅根据 `level_id` 自行猜测有效参与状态。
+当前数据由 `GET /flame/admin/api/season-statistics/current` 提供。接口已经按项目数量达标且等级已锁定的口径筛选 `participants`，前端仅按 `level_id` 聚合，不再次推断有效参与状态。
 
-> [!WARNING]
-> 当前尚无对应的管理端统计接口契约，不得根据数据库文档自行构造接口路径、分页参数或响应结构。
+用户姓名、部门和头像相对地址由 `GET /flame/admin/api/user/user-info` 按需提供。头像继续交给 `GET /flame/admin/api/image/avator` 获取二进制，组件仅消费页面创建的 `avatarObjectUrl`。
+
+组件由工作台使用 `KeepAlive` 承载，饼图实例在模块切换期间保持。人员名单与头像缓存由工作台持有；退出登录会卸载整个工作台。
 
 ## 依赖与关联代码
 
 - 组件代码：`src/components/dashboard/ChallengeLevelEnrollmentCard.vue`
-- 共享翻转容器：`src/components/dashboard/EnrollmentFlipCard.vue`
+- 共享卡片容器：`src/components/dashboard/EnrollmentFlipCard.vue`
 - 饼状图：`src/components/dashboard/ChallengeLevelPieChart.vue`
 - 当前调用方：`src/components/layout/MainWorkspaceShell.vue`
-- 赛季用户关系：`description/db/season_user.md`
-- 用户信息：`description/db/user.md`
-- 部门信息：`description/db/department.md`
+- 当前赛季接口：`description/api/dashboard/current-season.md`
+- 用户详情接口：`description/api/user/user-info.md`
+- 头像中转接口：`description/api/image/avatar.md`

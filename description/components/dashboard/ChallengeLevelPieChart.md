@@ -19,7 +19,7 @@
 - 图表高度跟随翻转卡片剩余空间自适应，圆心居中并收紧外侧标签引导线。
 - Canvas 绘制的等级名称和人数使用与页面文字一致的柔和阴影。
 
-当前工作台原型使用数据库文档中已有示例名称：青铜、白银和黄金。实际等级列表必须以后端统计接口返回结果为准。
+当前工作台的等级名称和人数来自当前赛季接口，并由看板服务按 `level_id` 聚合。组件不限定青铜、白银和黄金等固定等级名称。
 
 ---
 
@@ -66,7 +66,7 @@ ECharts 根据各等级报名人数计算扇区角度，扇区占整圆的比例
 在当前业务规则下，一个用户在赛季内只选择一个统一挑战等级，因此各等级人数之和正常情况下应与正式参赛用户数量保持一致。赛季报名总人数已在当前赛季卡片中展示，饼状图不再次显示汇总值。
 
 > [!WARNING]
-> `items` 应至少包含一个有效等级，`value` 应为非负数。接口适配层需要在数据进入组件前过滤无效项目。
+> `items` 应至少包含一个有效等级，`value` 应为非负数。空数据由外层 `ChallengeLevelEnrollmentCard` 展示空状态，不创建空图表实例。
 
 ## 依赖与关联代码
 
@@ -76,3 +76,4 @@ ECharts 根据各等级报名人数计算扇区角度，扇区占整圆的比例
 - 当前直接调用方：`src/components/dashboard/ChallengeLevelEnrollmentCard.vue`
 - 等级数据结构：`description/db/project_level.md`
 - 用户赛季关系：`description/db/season_user.md`
+- 当前赛季接口：`description/api/dashboard/current-season.md`

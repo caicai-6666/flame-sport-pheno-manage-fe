@@ -1,5 +1,24 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { getAllProducts } from '../../api/product/productListApi.js'
+import {
+  createProduct,
+  ProductCreateRequestError,
+} from '../../api/product/productCreateApi.js'
+import {
+  ProductStatusUpdateRequestError,
+  updateProductStatus,
+} from '../../api/product/productStatusUpdateApi.js'
+import {
+  ProductUpdateRequestError,
+  updateProduct,
+} from '../../api/product/productUpdateApi.js'
+import { loadProductImages } from '../../services/productImageLoader.js'
+import {
+  formatImageSize,
+  processProductImage,
+  ProductImageProcessingError,
+} from '../../utils/productImageProcessor.js'
 import RewardCreateSheet from './RewardCreateSheet.vue'
 
 const rewardPalettes = [
@@ -10,119 +29,96 @@ const rewardPalettes = [
   ['#d26f7f', '#f2c5cd', '#7b3e49'],
 ]
 
-// 原型数据使用 product 表的字段命名，接入接口后只需替换数据来源和提交动作。
-const rewards = ref([
-  {
-    id: 1,
-    name: '轻量跳绳',
-    description: '顺滑轴承与亲肤握把，适合日常有氧训练。',
-    points_required: 80,
-    image_url: '',
-    status: 1,
-    artworkHeight: 142,
-    palette: rewardPalettes[0],
-    artworkPaths: [
-      'M31 14c-8 1-12 8-12 17 0 11 6 19 16 19s16-8 16-19c0-9-4-16-12-17',
-      'M27 9h8v12h-8zM35 9h8v12h-8z',
-    ],
-  },
-  {
-    id: 2,
-    name: '速干运动毛巾',
-    description: '柔软吸汗，轻巧便携，适合训练后快速擦拭。',
-    points_required: 120,
-    image_url: '',
-    status: 1,
-    artworkHeight: 176,
-    palette: rewardPalettes[1],
-    artworkPaths: [
-      'M18 13h36v34H18z',
-      'M18 22h36M29 13v34M42 13v34M23 39h26',
-    ],
-  },
-  {
-    id: 3,
-    name: '随行运动水杯',
-    description: '大容量防漏杯身，通勤与户外运动均可使用。',
-    points_required: 180,
-    image_url: '',
-    status: 1,
-    artworkHeight: 224,
-    palette: rewardPalettes[2],
-    artworkPaths: [
-      'M25 16h22l-2 38H27z',
-      'M29 9h14v7H29zM31 25h10M30 34h12',
-    ],
-  },
-  {
-    id: 4,
-    name: '防滑瑜伽垫',
-    description: '加厚缓冲与细腻防滑纹理，兼顾拉伸和力量训练。',
-    points_required: 320,
-    image_url: '',
-    status: 1,
-    artworkHeight: 136,
-    palette: rewardPalettes[3],
-    artworkPaths: [
-      'M13 37h41c5 0 8 3 8 8s-3 8-8 8H13z',
-      'M54 37c-5 0-8 3-8 8s3 8 8 8 8-3 8-8-3-8-8-8zM13 37l8-17h34',
-    ],
-  },
-  {
-    id: 5,
-    name: '城市运动背包',
-    description: '独立鞋仓与透气背板，满足训练和短途出行收纳。',
-    points_required: 520,
-    image_url: '',
-    status: 1,
-    artworkHeight: 204,
-    palette: rewardPalettes[4],
-    artworkPaths: [
-      'M21 25h30l5 31H16z',
-      'M27 25v-4c0-7 4-11 9-11s9 4 9 11v4M24 36h24M28 44h16',
-    ],
-  },
-])
+const rewardArtworkAspectRatios = [1.55, 1.24, 0.9, 1.72, 0.72]
+const rewardArtworkPaths = [
+  [
+    'M31 14c-8 1-12 8-12 17 0 11 6 19 16 19s16-8 16-19c0-9-4-16-12-17',
+    'M27 9h8v12h-8zM35 9h8v12h-8z',
+  ],
+  ['M18 13h36v34H18z', 'M18 22h36M29 13v34M42 13v34M23 39h26'],
+  ['M25 16h22l-2 38H27z', 'M29 9h14v7H29zM31 25h10M30 34h12'],
+  [
+    'M13 37h41c5 0 8 3 8 8s-3 8-8 8H13z',
+    'M54 37c-5 0-8 3-8 8s3 8 8 8 8-3 8-8-3-8-8-8zM13 37l8-17h34',
+  ],
+  [
+    'M21 25h30l5 31H16z',
+    'M27 25v-4c0-7 4-11 9-11s9 4 9 11v4M24 36h24M28 44h16',
+  ],
+]
+
+const SAVE_CONFIRMATION_TIMEOUT_MS = 3000
+
+const rewards = ref([])
+const isProductListLoading = ref(false)
+const isProductListLoaded = ref(false)
+const productListError = ref('')
+const productListNotice = ref('')
 
 const editingRewardId = ref(null)
+const rewardEditorSessionId = ref(0)
 const masonryRef = ref(null)
 const masonryWidth = ref(0)
 const isCreateSheetOpen = ref(false)
-const deleteConfirmationVisible = ref(false)
+const isRewardCreating = ref(false)
+const rewardCreateError = ref('')
 const validationMessage = ref('')
 const imageValidationMessage = ref('')
 const draft = ref(createEmptyDraft())
+const originalDraft = ref(createEmptyDraft())
+const isRewardSaving = ref(false)
+const isSaveConfirmationActive = ref(false)
+const isRewardImageProcessing = ref(false)
 
 let sortTimerId = 0
-let removeTimerId = 0
 let masonryObserver
+let productListRequestController
+let productImageRequestController
+let productUpdateRequestController
+let productCreateRequestController
+let saveConfirmationTimerId = 0
+const productImageObjectUrls = new Map()
+const productStatusRequestControllers = new Map()
 
 const MASONRY_GAP = 15
-const CARD_CONTENT_HEIGHT = 154
 const CREATE_CARD_ID = 'create-reward'
 const CREATE_CARD_HEIGHT = 196
-// 该高度可以完整容纳背面表单；正面图片较高时，卡片可在此基础上继续增高。
-const CARD_EDITOR_MIN_HEIGHT = 356
-
-let nextLocalRewardId = Math.max(...rewards.value.map((reward) => reward.id)) + 1
+// 比例换算高度过小时适度放大图片容器，确保正反两面始终使用同一完整尺寸。
+const CARD_FULL_CONTENT_MIN_HEIGHT = 356
 
 const masonryLayout = computed(() => {
   const availableWidth = masonryWidth.value || 900
-  const columnCount = availableWidth >= 820 ? 3 : availableWidth >= 520 ? 2 : 1
+  // 通过增加列数适度缩小卡片，而不是缩放或裁切图片，确保原始宽高比不变。
+  const columnCount = availableWidth >= 820
+    ? 4
+    : availableWidth >= 620
+      ? 3
+      : availableWidth >= 420
+        ? 2
+        : 1
   const columnWidth = (availableWidth - MASONRY_GAP * (columnCount - 1)) / columnCount
   const columnHeights = Array.from({ length: columnCount }, () => 0)
   const positions = {}
+  const artworkHeights = {}
 
-  const layoutItems = [
-    { id: CREATE_CARD_ID, height: CREATE_CARD_HEIGHT },
-    ...rewards.value.map((reward) => ({
-      id: reward.id,
-      height: Math.max(
-        CARD_EDITOR_MIN_HEIGHT,
-        reward.artworkHeight + CARD_CONTENT_HEIGHT,
-      ),
-    })),
-  ]
+  const layoutItems = isProductListLoaded.value
+    ? [
+        { id: CREATE_CARD_ID, height: CREATE_CARD_HEIGHT },
+        ...rewards.value.map((reward) => {
+          // 图片区始终使用原始宽高比；列宽变化时同步重算整张卡片高度。
+          const naturalArtworkHeight = columnWidth / reward.imageAspectRatio
+          const artworkHeight = Math.max(
+            naturalArtworkHeight,
+            CARD_FULL_CONTENT_MIN_HEIGHT,
+          )
+          artworkHeights[reward.id] = artworkHeight
+          return {
+            id: reward.id,
+            height: artworkHeight,
+          }
+        }),
+      ]
+    : []
 
   layoutItems.forEach((item) => {
     const shortestHeight = Math.min(...columnHeights)
@@ -139,6 +135,7 @@ const masonryLayout = computed(() => {
   return {
     height: Math.max(0, ...columnHeights) - MASONRY_GAP,
     positions,
+    artworkHeights,
   }
 })
 
@@ -149,118 +146,282 @@ function createEmptyDraft() {
     points_required: '',
     image_url: '',
     imageFileName: '',
-    artworkHeight: 176,
+    imageFile: null,
+    imageSize: 0,
+    imageAspectRatio: 1,
+  }
+}
+
+function cloneDraft(source) {
+  return { ...source }
+}
+
+function createDraftFromReward(reward) {
+  return {
+    name: reward.name,
+    description: reward.description ?? '',
+    points_required: String(reward.points_required),
+    image_url: reward.imagePreviewUrl ?? '',
+    imageFileName: '',
+    imageFile: null,
+    imageSize: 0,
+    imageAspectRatio: reward.imageAspectRatio,
+  }
+}
+
+function createRewardView(product, index) {
+  return {
+    id: product.id,
+    name: product.name,
+    description: product.description,
+    points_required: product.pointsRequired,
+    image_url: product.imageUrl,
+    imagePreviewUrl: '',
+    imageState: product.imageUrl ? 'loading' : 'empty',
+    status: product.status,
+    isStatusUpdating: false,
+    statusUpdateMessage: '',
+    imageAspectRatio: rewardArtworkAspectRatios[index % rewardArtworkAspectRatios.length],
+    palette: rewardPalettes[index % rewardPalettes.length],
+    artworkPaths: rewardArtworkPaths[index % rewardArtworkPaths.length],
+  }
+}
+
+function normalizeImageAspectRatio(width, height) {
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return 1
+  }
+  return width / height
+}
+
+function measureRewardImage(reward, imageUrl) {
+  const image = new Image()
+  image.addEventListener('load', () => {
+    if (reward.imagePreviewUrl !== imageUrl || image.naturalHeight <= 0) return
+    reward.imageAspectRatio = normalizeImageAspectRatio(
+      image.naturalWidth,
+      image.naturalHeight,
+    )
+  }, { once: true })
+  image.src = imageUrl
+}
+
+function releaseProductImageObjectUrls() {
+  productImageObjectUrls.forEach((objectUrl) => URL.revokeObjectURL(objectUrl))
+  productImageObjectUrls.clear()
+}
+
+function startProductImageLoading(products, signal) {
+  if (!products.some((product) => product.imageUrl)) return
+
+  void loadProductImages(products, {
+    signal,
+    onImageLoaded({ imageUrl, productIds, blob }) {
+      const objectUrl = URL.createObjectURL(blob)
+      productImageObjectUrls.set(imageUrl, objectUrl)
+      const productIdSet = new Set(productIds)
+      rewards.value.forEach((reward) => {
+        if (!productIdSet.has(reward.id) || reward.image_url !== imageUrl) return
+        reward.imagePreviewUrl = objectUrl
+        reward.imageState = 'loaded'
+        measureRewardImage(reward, objectUrl)
+      })
+    },
+    onImageFailed({ productIds }) {
+      const productIdSet = new Set(productIds)
+      rewards.value.forEach((reward) => {
+        if (productIdSet.has(reward.id)) reward.imageState = 'failed'
+      })
+    },
+  }).catch((error) => {
+    // 认证失效由统一请求层切回登录视图；主动取消不应污染当前列表状态。
+    if (error?.name === 'AbortError' || error?.name === 'AdminAuthenticationRequiredError') return
+  })
+}
+
+async function loadProducts({ force = false } = {}) {
+  if ((isProductListLoaded.value && !force) || isProductListLoading.value) return
+
+  productListRequestController?.abort()
+  productImageRequestController?.abort()
+  releaseProductImageObjectUrls()
+  productListRequestController = new AbortController()
+  productImageRequestController = new AbortController()
+  isProductListLoading.value = true
+  isProductListLoaded.value = false
+  productListError.value = ''
+  cancelRewardEditing()
+
+  try {
+    const products = await getAllProducts({ signal: productListRequestController.signal })
+    // 页面继续沿用积分升序；接口层保留后端 ID 升序，供其他调用方稳定复用。
+    rewards.value = products
+      .map(createRewardView)
+      .sort((left, right) => left.points_required - right.points_required || left.id - right.id)
+    isProductListLoaded.value = true
+    startProductImageLoading(products, productImageRequestController.signal)
+  } catch (error) {
+    if (error?.name === 'AbortError' || error?.name === 'AdminAuthenticationRequiredError') return
+    rewards.value = []
+    productListError.value = error?.message || '奖品列表暂时无法获取，请稍后重试'
+  } finally {
+    isProductListLoading.value = false
   }
 }
 
 async function openRewardEditor(reward) {
   window.clearTimeout(sortTimerId)
-  window.clearTimeout(removeTimerId)
+  isRewardImageProcessing.value = false
+  rewardEditorSessionId.value += 1
   editingRewardId.value = reward.id
-  deleteConfirmationVisible.value = false
+  reward.statusUpdateMessage = ''
+  productListNotice.value = ''
   validationMessage.value = ''
   imageValidationMessage.value = ''
-  draft.value = {
-    name: reward.name,
-    description: reward.description ?? '',
-    points_required: String(reward.points_required),
-    image_url: reward.image_url ?? '',
-    imageFileName: '',
-    artworkHeight: reward.artworkHeight,
-  }
+  clearSaveConfirmation()
+  originalDraft.value = createDraftFromReward(reward)
+  draft.value = cloneDraft(originalDraft.value)
 
   await nextTick()
   document.querySelector(`[data-reward-id="${reward.id}"] input[name="reward-name"]`)?.focus()
 }
 
-function closeRewardEditor() {
+function leaveRewardEditor() {
+  clearSaveConfirmation()
+  isRewardImageProcessing.value = false
+  rewardEditorSessionId.value += 1
   editingRewardId.value = null
-  deleteConfirmationVisible.value = false
   validationMessage.value = ''
   imageValidationMessage.value = ''
-  draft.value = createEmptyDraft()
+}
+
+function cancelRewardEditing(force = false) {
+  if (isRewardSaving.value && !force) return
+  if (editingRewardId.value !== null) {
+    // 取消时先恢复打开卡片时的快照，确保翻回动画和下次打开都不残留未提交修改。
+    draft.value = cloneDraft(originalDraft.value)
+  }
+  leaveRewardEditor()
+}
+
+function finishRewardEditing() {
+  // 保存后保留已提交草稿作为翻回动画内容，下一次打开仍会重新从奖品模型建立快照。
+  originalDraft.value = cloneDraft(draft.value)
+  leaveRewardEditor()
 }
 
 function openCreateSheet() {
-  closeRewardEditor()
+  cancelRewardEditing(true)
+  productListNotice.value = ''
+  rewardCreateError.value = ''
   isCreateSheetOpen.value = true
 }
 
 function closeCreateSheet() {
+  if (isRewardCreating.value) return
   isCreateSheetOpen.value = false
+  rewardCreateError.value = ''
 }
 
-function createReward(payload) {
-  const localId = nextLocalRewardId++
-  const reward = {
-    id: localId,
-    name: payload.name,
-    description: payload.description,
-    points_required: payload.pointsRequired,
-    image_url: payload.imageDataUrl,
-    status: 1,
-    artworkHeight: payload.artworkHeight,
-    palette: rewardPalettes[(localId - 1) % rewardPalettes.length],
-    artworkPaths: [
-      'M17 28h38v27H17zM36 28v27M14 28h44v-9H14z',
-      'M36 19H25c-6 0-7-9-1-10 5-1 9 4 12 10zm0 0h11c6 0 7-9 1-10-5-1-9 4-12 10z',
-    ],
-  }
+function clearRewardCreateError() {
+  rewardCreateError.value = ''
+}
 
-  // 新商品创建后立即回到积分升序，瀑布流会平滑计算其落点。
-  rewards.value = [...rewards.value, reward].sort(
-    (left, right) => left.points_required - right.points_required || left.id - right.id,
-  )
-  closeCreateSheet()
+async function createReward(payload) {
+  if (isRewardCreating.value) return
+
+  productCreateRequestController?.abort()
+  const requestController = new AbortController()
+  productCreateRequestController = requestController
+  isRewardCreating.value = true
+  rewardCreateError.value = ''
+
+  try {
+    const createdProduct = await createProduct({
+      name: payload.name,
+      description: payload.description,
+      pointsRequired: payload.pointsRequired,
+      imageFile: payload.imageFile,
+    }, { signal: requestController.signal })
+    if (productCreateRequestController !== requestController) return
+
+    const reward = createRewardView(createdProduct, rewards.value.length)
+    // 当前会话复用表单已经解码的 WebP，避免创建成功后立即重复请求同一图片。
+    reward.imagePreviewUrl = payload.imageDataUrl
+    reward.imageState = 'loaded'
+    reward.imageAspectRatio = payload.imageAspectRatio
+    rewards.value = [...rewards.value, reward].sort(
+      (left, right) => left.points_required - right.points_required || left.id - right.id,
+    )
+    isCreateSheetOpen.value = false
+  } catch (error) {
+    if (error?.name === 'AbortError' || error?.name === 'AdminAuthenticationRequiredError') return
+
+    if (error instanceof ProductCreateRequestError && error.partiallyApplied) {
+      const partialSuccessMessage = error.message
+      productCreateRequestController = null
+      isRewardCreating.value = false
+      isCreateSheetOpen.value = false
+      // 502 表示数据库可能已有新奖品，关闭旧草稿并重拉，防止管理员重复创建。
+      await loadProducts({ force: true })
+      productListNotice.value = productListError.value
+        ? `${partialSuccessMessage}；奖品列表同步失败，请重新加载`
+        : `${partialSuccessMessage}，已重新同步奖品列表`
+      return
+    }
+
+    rewardCreateError.value = error instanceof ProductCreateRequestError
+      ? error.message
+      : '奖品创建失败，请稍后重试'
+  } finally {
+    if (productCreateRequestController === requestController) {
+      productCreateRequestController = null
+      isRewardCreating.value = false
+    }
+  }
 }
 
 function clearValidation() {
+  // 二次确认只对应当时已检查的草稿，任一字段变化后必须重新确认。
+  clearSaveConfirmation()
   validationMessage.value = ''
 }
 
-function handleImageSelection(event) {
+function clearSaveConfirmation() {
+  window.clearTimeout(saveConfirmationTimerId)
+  saveConfirmationTimerId = 0
+  isSaveConfirmationActive.value = false
+}
+
+async function handleImageSelection(event) {
   const [file] = event.target.files ?? []
+  const sessionId = rewardEditorSessionId.value
+  const rewardId = editingRewardId.value
   imageValidationMessage.value = ''
+  clearSaveConfirmation()
 
   if (!file) return
 
-  const supportedTypes = ['image/png', 'image/jpeg', 'image/webp']
-  if (!supportedTypes.includes(file.type)) {
-    imageValidationMessage.value = '请选择 PNG、JPG 或 WebP 图片'
+  isRewardImageProcessing.value = true
+  try {
+    const processedImage = await processProductImage(file)
+    if (sessionId !== rewardEditorSessionId.value || rewardId !== editingRewardId.value) return
+    draft.value.image_url = processedImage.dataUrl
+    draft.value.imageFileName = processedImage.fileName
+    draft.value.imageFile = processedImage.file
+    draft.value.imageSize = processedImage.size
+    draft.value.imageAspectRatio = processedImage.aspectRatio
+  } catch (error) {
+    if (sessionId !== rewardEditorSessionId.value || rewardId !== editingRewardId.value) return
+    imageValidationMessage.value = error instanceof ProductImageProcessingError
+      ? error.message
+      : '奖品图片压缩失败，请重新选择'
     event.target.value = ''
-    return
+  } finally {
+    if (sessionId === rewardEditorSessionId.value && rewardId === editingRewardId.value) {
+      isRewardImageProcessing.value = false
+    }
   }
-
-  if (file.size > 5 * 1024 * 1024) {
-    imageValidationMessage.value = '图片大小不能超过 5 MB'
-    event.target.value = ''
-    return
-  }
-
-  const reader = new FileReader()
-  reader.addEventListener('load', () => {
-    // Data URL 仅用于原型预览；真实提交时应改为上传文件后保存服务端图片地址。
-    const dataUrl = String(reader.result ?? '')
-    draft.value.image_url = dataUrl
-    draft.value.imageFileName = file.name
-
-    const image = new Image()
-    image.addEventListener('load', () => {
-      const aspectRatio = image.naturalWidth / image.naturalHeight
-
-      // 横图、方图和竖图使用不同展示高度，形成稳定而不过度参差的瀑布流节奏。
-      if (aspectRatio >= 1.5) draft.value.artworkHeight = 136
-      else if (aspectRatio >= 1.12) draft.value.artworkHeight = 156
-      else if (aspectRatio >= 0.86) draft.value.artworkHeight = 180
-      else if (aspectRatio >= 0.65) draft.value.artworkHeight = 206
-      else draft.value.artworkHeight = 230
-    })
-    image.src = dataUrl
-  })
-  reader.addEventListener('error', () => {
-    imageValidationMessage.value = '图片读取失败，请重新选择'
-  })
-  reader.readAsDataURL(file)
 }
 
 function validateDraft() {
@@ -290,60 +451,142 @@ function sortRewards() {
   )
 }
 
-function saveReward(reward) {
+function createProductPatch(reward) {
+  const normalizedName = draft.value.name.trim()
+  const normalizedDescription = draft.value.description.trim() || null
+  const normalizedPoints = Number(draft.value.points_required)
+  const patch = {}
+
+  if (normalizedName !== reward.name) patch.name = normalizedName
+  if (normalizedPoints !== reward.points_required) patch.pointsRequired = normalizedPoints
+  if (normalizedDescription !== (reward.description ?? null)) {
+    patch.description = normalizedDescription
+  }
+  if (draft.value.imageFile) patch.imageFile = draft.value.imageFile
+  return patch
+}
+
+async function saveReward(reward) {
+  if (isRewardSaving.value || isRewardImageProcessing.value || reward.isStatusUpdating) return
   const message = validateDraft()
   if (message) {
     validationMessage.value = message
     return
   }
 
-  reward.name = draft.value.name.trim()
-  reward.description = draft.value.description.trim()
-  reward.points_required = Number(draft.value.points_required)
-  reward.image_url = draft.value.image_url
-  reward.artworkHeight = draft.value.artworkHeight
-  closeRewardEditor()
-
-  // 等待卡片翻回正面后再重排，价格变化时不会出现翻转过程中突然换位。
-  sortTimerId = window.setTimeout(sortRewards, 720)
-}
-
-function toggleRewardVisibility(reward) {
-  // 隐藏对应 product.status = 0，管理端仍保留该卡片以便恢复展示。
-  reward.status = reward.status === 0 ? 1 : 0
-}
-
-function requestRewardDeletion() {
-  deleteConfirmationVisible.value = true
-}
-
-function cancelRewardDeletion() {
-  deleteConfirmationVisible.value = false
-}
-
-function confirmRewardDeletion(reward) {
-  // 真实删除前必须由后端校验兑换历史引用，本轮只移除本地原型数据。
-  const rewardId = reward.id
-  deleteConfirmationVisible.value = false
-  closeRewardEditor()
-  removeTimerId = window.setTimeout(() => {
-    rewards.value = rewards.value.filter((item) => item.id !== rewardId)
-  }, 720)
-}
-
-function handleEditorEscape() {
-  if (deleteConfirmationVisible.value) {
-    cancelRewardDeletion()
+  const patch = createProductPatch(reward)
+  if (Object.keys(patch).length === 0) {
+    finishRewardEditing()
     return
   }
 
-  closeRewardEditor()
+  validationMessage.value = ''
+  if (!isSaveConfirmationActive.value) {
+    isSaveConfirmationActive.value = true
+    saveConfirmationTimerId = window.setTimeout(
+      clearSaveConfirmation,
+      SAVE_CONFIRMATION_TIMEOUT_MS,
+    )
+    return
+  }
+
+  clearSaveConfirmation()
+
+  productUpdateRequestController?.abort()
+  productCreateRequestController?.abort()
+  const requestController = new AbortController()
+  productUpdateRequestController = requestController
+  isRewardSaving.value = true
+  validationMessage.value = ''
+
+  try {
+    const updatedProduct = await updateProduct(reward.id, patch, {
+      signal: requestController.signal,
+    })
+    if (productUpdateRequestController !== requestController) return
+
+    reward.name = updatedProduct.name
+    reward.description = updatedProduct.description
+    reward.points_required = updatedProduct.pointsRequired
+    reward.status = updatedProduct.status
+    reward.image_url = updatedProduct.imageUrl
+    if (draft.value.imageFile) {
+      // 服务端生成唯一地址；当前会话直接复用已编码的 WebP 预览，避免成功后重复下载。
+      reward.imagePreviewUrl = draft.value.image_url
+      reward.imageState = 'loaded'
+      reward.imageAspectRatio = draft.value.imageAspectRatio
+    }
+    finishRewardEditing()
+
+    // 等待卡片翻回正面后再重排，价格变化时不会出现翻转过程中突然换位。
+    sortTimerId = window.setTimeout(sortRewards, 720)
+  } catch (error) {
+    if (error?.name === 'AbortError' || error?.name === 'AdminAuthenticationRequiredError') return
+
+    if (error instanceof ProductUpdateRequestError && error.partiallyApplied) {
+      const partialSuccessMessage = error.message
+      productUpdateRequestController = null
+      isRewardSaving.value = false
+      // 502 可能发生在数据库提交后，必须舍弃旧草稿并重新获取服务端最终状态。
+      await loadProducts({ force: true })
+      productListNotice.value = productListError.value
+        ? `${partialSuccessMessage}；奖品列表同步失败，请重新加载`
+        : `${partialSuccessMessage}，已重新同步奖品列表`
+      return
+    }
+    validationMessage.value = error instanceof ProductUpdateRequestError
+      ? error.message
+      : '奖品基本信息修改失败，请稍后重试'
+  } finally {
+    if (productUpdateRequestController === requestController) {
+      productUpdateRequestController = null
+      isRewardSaving.value = false
+    }
+  }
+}
+
+async function toggleRewardVisibility(reward) {
+  if (reward.isStatusUpdating || isRewardSaving.value || isRewardImageProcessing.value) return
+
+  clearSaveConfirmation()
+  const nextStatus = reward.status === 0 ? 1 : 0
+  const requestController = new AbortController()
+  productStatusRequestControllers.get(reward.id)?.abort()
+  productStatusRequestControllers.set(reward.id, requestController)
+  reward.isStatusUpdating = true
+  reward.statusUpdateMessage = ''
+
+  try {
+    const updatedProduct = await updateProductStatus(reward.id, nextStatus, {
+      signal: requestController.signal,
+    })
+    if (productStatusRequestControllers.get(reward.id) !== requestController) return
+
+    // 服务端明确该接口只改变 status；其余完整字段用于校验响应，不覆盖尚未保存的编辑草稿。
+    reward.status = updatedProduct.status
+  } catch (error) {
+    if (error?.name === 'AbortError' || error?.name === 'AdminAuthenticationRequiredError') return
+    reward.statusUpdateMessage = error instanceof ProductStatusUpdateRequestError
+      ? error.message
+      : '奖品上下架状态修改失败，请稍后重试'
+  } finally {
+    if (productStatusRequestControllers.get(reward.id) === requestController) {
+      productStatusRequestControllers.delete(reward.id)
+      reward.isStatusUpdating = false
+    }
+  }
 }
 
 onBeforeUnmount(() => {
   window.clearTimeout(sortTimerId)
-  window.clearTimeout(removeTimerId)
+  clearSaveConfirmation()
   masonryObserver?.disconnect()
+  productListRequestController?.abort()
+  productImageRequestController?.abort()
+  productUpdateRequestController?.abort()
+  productStatusRequestControllers.forEach((controller) => controller.abort())
+  productStatusRequestControllers.clear()
+  releaseProductImageObjectUrls()
 })
 
 onMounted(() => {
@@ -351,6 +594,7 @@ onMounted(() => {
     masonryWidth.value = entry.contentRect.width
   })
   if (masonryRef.value) masonryObserver.observe(masonryRef.value)
+  void loadProducts()
 })
 </script>
 
@@ -362,10 +606,16 @@ onMounted(() => {
           <h2>全部奖品</h2>
           <p>按兑换积分从低到高排列</p>
         </div>
-        <span>{{ rewards.length }} 件奖品</span>
+        <span aria-live="polite">
+          {{ isProductListLoading ? '正在加载…' : productListError ? '加载失败' : `${rewards.length} 件奖品` }}
+        </span>
       </header>
 
-      <div ref="masonryRef" class="reward-configuration__masonry">
+      <p v-if="productListNotice" class="reward-configuration__notice" role="status">
+        {{ productListNotice }}
+      </p>
+
+      <div v-show="isProductListLoaded" ref="masonryRef" class="reward-configuration__masonry">
         <TransitionGroup
           name="reward-list"
           tag="div"
@@ -373,6 +623,7 @@ onMounted(() => {
           :style="{ height: `${masonryLayout.height}px` }"
         >
           <div
+            v-if="isProductListLoaded"
             :key="CREATE_CARD_ID"
             class="reward-create-card-slot"
             :style="masonryLayout.positions[CREATE_CARD_ID]"
@@ -380,14 +631,14 @@ onMounted(() => {
             <button
               type="button"
               class="reward-create-card"
-              aria-label="新增商品"
+              aria-label="新增奖品"
               @click="openCreateSheet"
             >
               <span class="reward-create-card__plus" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
               </span>
               <span>
-                <strong>新增商品</strong>
+                <strong>新增奖品</strong>
                 <small>创建一件积分商城奖品</small>
               </span>
             </button>
@@ -411,7 +662,7 @@ onMounted(() => {
             '--reward-primary': reward.palette[0],
             '--reward-secondary': reward.palette[1],
             '--reward-ink': reward.palette[2],
-            '--reward-artwork-height': `${reward.artworkHeight}px`,
+            '--reward-artwork-height': `${masonryLayout.artworkHeights[reward.id]}px`,
             '--reward-enter-delay': `${index * 75}ms`,
           }"
         >
@@ -426,11 +677,24 @@ onMounted(() => {
               @click="openRewardEditor(reward)"
             >
               <span class="reward-card__artwork">
-                <img v-if="reward.image_url" :src="reward.image_url" alt="" />
+                <img
+                  v-if="reward.imagePreviewUrl"
+                  :src="reward.imagePreviewUrl"
+                  alt=""
+                  class="reward-card__product-image"
+                />
+                <span
+                  v-else-if="reward.imageState === 'loading'"
+                  class="reward-card__image-loading"
+                  aria-label="奖品图片加载中"
+                >
+                  <span class="reward-card__image-loading-orbit" aria-hidden="true"><i></i></span>
+                  <small>图片加载中</small>
+                </span>
                 <svg v-else viewBox="0 0 72 64" aria-hidden="true">
                   <path v-for="path in reward.artworkPaths" :key="path" :d="path" />
                 </svg>
-                <small v-if="reward.status === 0">已隐藏</small>
+                <small v-if="reward.status === 0">已下架</small>
               </span>
 
               <span class="reward-card__content">
@@ -454,10 +718,15 @@ onMounted(() => {
               :aria-hidden="editingRewardId !== reward.id"
               :inert="editingRewardId !== reward.id"
               @submit.prevent="saveReward(reward)"
-              @keydown.esc.prevent="handleEditorEscape"
+              @keydown.esc.prevent="cancelRewardEditing()"
             >
               <header class="reward-card__editor-header">
-                <button type="button" aria-label="返回奖品正面" @click="closeRewardEditor">
+                <button
+                  type="button"
+                  aria-label="取消修改并返回奖品正面"
+                  :disabled="isRewardSaving"
+                  @click="cancelRewardEditing()"
+                >
                   <svg viewBox="0 0 24 24"><path d="m15 6-6 6 6 6" /></svg>
                 </button>
                 <div>
@@ -467,9 +736,14 @@ onMounted(() => {
                 <div class="reward-card__management-actions">
                   <button
                     type="button"
-                    :class="{ 'is-restore': reward.status === 0 }"
-                    :aria-label="reward.status === 0 ? '恢复展示' : '隐藏奖品'"
-                    :title="reward.status === 0 ? '恢复展示' : '隐藏奖品'"
+                    :class="{
+                      'is-restore': reward.status === 0,
+                      'is-updating': reward.isStatusUpdating,
+                    }"
+                    :disabled="reward.isStatusUpdating || isRewardSaving"
+                    :aria-busy="reward.isStatusUpdating"
+                    :aria-label="reward.status === 0 ? '上架奖品' : '下架奖品'"
+                    :title="reward.status === 0 ? '上架奖品' : '下架奖品'"
                     @click="toggleRewardVisibility(reward)"
                   >
                     <svg v-if="reward.status === 0" viewBox="0 0 24 24">
@@ -478,19 +752,12 @@ onMounted(() => {
                     <svg v-else viewBox="0 0 24 24">
                       <path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6zM4 4l16 16" />
                     </svg>
-                    <span>{{ reward.status === 0 ? '恢复' : '隐藏' }}</span>
-                  </button>
-                  <button
-                    type="button"
-                    class="is-danger"
-                    aria-label="删除奖品"
-                    title="删除奖品"
-                    @click="requestRewardDeletion"
-                  >
-                    <svg viewBox="0 0 24 24">
-                      <path d="M4 7h16M9 7V4h6v3m3 0-1 13H7L6 7m4 4v5m4-5v5" />
-                    </svg>
-                    <span>删除</span>
+                    <span v-if="reward.isStatusUpdating" class="reward-card__status-spinner" aria-hidden="true"></span>
+                    <span>
+                      {{ reward.isStatusUpdating
+                        ? (reward.status === 0 ? '上架中' : '下架中')
+                        : (reward.status === 0 ? '上架' : '下架') }}
+                    </span>
                   </button>
                 </div>
               </header>
@@ -498,7 +765,9 @@ onMounted(() => {
               <div class="reward-card__editor-body">
                 <label class="reward-card__image-editor">
                   <input
+                    :key="`reward-image-${reward.id}-${rewardEditorSessionId}`"
                     type="file"
+                    :disabled="isRewardSaving || isRewardImageProcessing"
                     accept="image/png,image/jpeg,image/webp"
                     @change="handleImageSelection"
                   />
@@ -509,8 +778,10 @@ onMounted(() => {
                     </svg>
                   </span>
                   <span class="reward-card__image-copy">
-                    <strong>{{ draft.imageFileName || '更换奖品图片' }}</strong>
-                    <small>{{ imageValidationMessage || 'PNG / JPG / WebP，最大 5 MB' }}</small>
+                    <strong>{{ isRewardImageProcessing ? '正在压缩图片…' : draft.imageFileName || '更换奖品图片' }}</strong>
+                    <small v-if="imageValidationMessage || draft.imageSize">
+                      {{ imageValidationMessage || `已转为 WebP · ${formatImageSize(draft.imageSize)}` }}
+                    </small>
                   </span>
                   <span class="reward-card__image-add" aria-hidden="true">
                     <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
@@ -523,6 +794,7 @@ onMounted(() => {
                     <input
                       v-model="draft.name"
                       name="reward-name"
+                      :disabled="isRewardSaving"
                       maxlength="128"
                       autocomplete="off"
                       @input="clearValidation"
@@ -534,6 +806,7 @@ onMounted(() => {
                       <input
                         v-model="draft.points_required"
                         type="number"
+                        :disabled="isRewardSaving"
                         min="0"
                         max="4294967295"
                         step="1"
@@ -549,43 +822,51 @@ onMounted(() => {
                   <span>奖品描述</span>
                   <textarea
                     v-model="draft.description"
+                    :disabled="isRewardSaving"
                     maxlength="255"
                     rows="2"
                     @input="clearValidation"
                   ></textarea>
                 </label>
 
-                <p class="reward-card__validation" :class="{ 'is-visible': validationMessage }" role="alert">
-                  {{ validationMessage || '请确认奖品资料' }}
+                <p
+                  class="reward-card__validation"
+                  :class="{
+                    'is-visible': validationMessage || reward.statusUpdateMessage || isSaveConfirmationActive,
+                    'is-confirming': isSaveConfirmationActive,
+                  }"
+                  role="status"
+                  aria-live="polite"
+                >
+                  {{ reward.statusUpdateMessage
+                    || validationMessage
+                    || (isSaveConfirmationActive ? '请在 3 秒内再次确认' : '请确认奖品资料') }}
                 </p>
               </div>
 
               <footer class="reward-card__editor-footer">
-                <button type="button" @click="closeRewardEditor">取消</button>
-                <button type="submit">保存修改</button>
-              </footer>
-
-              <Transition name="reward-delete-confirm">
-                <section
-                  v-if="deleteConfirmationVisible"
-                  class="reward-card__delete-confirm"
-                  role="alertdialog"
-                  aria-modal="true"
-                  :aria-label="`确认删除${reward.name}`"
+                <button
+                  type="submit"
+                  :class="{
+                    'is-confirming': isSaveConfirmationActive,
+                    'is-saving': isRewardSaving,
+                  }"
+                  :disabled="isRewardSaving || isRewardImageProcessing || reward.isStatusUpdating"
+                  :aria-pressed="isSaveConfirmationActive"
                 >
-                  <span aria-hidden="true">
-                    <svg viewBox="0 0 24 24">
-                      <path d="M12 3 2.5 20h19L12 3zM12 9v5m0 3h.01" />
-                    </svg>
-                  </span>
-                  <h4>删除“{{ reward.name }}”？</h4>
-                  <p>原型中会直接移除这张卡片，刷新页面后恢复。</p>
-                  <div>
-                    <button type="button" @click="cancelRewardDeletion">暂不删除</button>
-                    <button type="button" @click="confirmRewardDeletion(reward)">确认删除</button>
-                  </div>
-                </section>
-              </Transition>
+                  <span v-if="isRewardSaving" class="reward-card__status-spinner" aria-hidden="true"></span>
+                  {{ isRewardImageProcessing
+                    ? '图片处理中'
+                    : isRewardSaving
+                      ? '保存中'
+                      : isSaveConfirmationActive ? '确认保存' : '保存修改' }}
+                  <span
+                    v-if="isSaveConfirmationActive"
+                    class="reward-card__save-progress"
+                    aria-hidden="true"
+                  ></span>
+                </button>
+              </footer>
             </form>
           </div>
         </article>
@@ -593,13 +874,31 @@ onMounted(() => {
         </TransitionGroup>
       </div>
 
-      <p v-if="rewards.length === 0" class="reward-configuration__empty">暂无奖品</p>
+      <div
+        v-if="isProductListLoading"
+        class="reward-configuration__state reward-configuration__state--loading"
+        role="status"
+      >
+        <span aria-hidden="true"><i></i><i></i><i></i></span>
+        <p>正在读取全部奖品</p>
+      </div>
+      <div v-else-if="productListError" class="reward-configuration__state" role="alert">
+        <p>{{ productListError }}</p>
+        <button type="button" @click="loadProducts({ force: true })">重新加载</button>
+      </div>
+      <p
+        v-else-if="isProductListLoaded && rewards.length === 0"
+        class="reward-configuration__empty"
+      >暂无奖品</p>
     </div>
 
     <Transition name="reward-create-sheet">
       <RewardCreateSheet
         v-if="isCreateSheetOpen"
+        :submitting="isRewardCreating"
+        :submit-error="rewardCreateError"
         @cancel="closeCreateSheet"
+        @clear-error="clearRewardCreateError"
         @submit="createReward"
       />
     </Transition>
@@ -634,6 +933,17 @@ onMounted(() => {
 .reward-configuration__header h2,
 .reward-configuration__header p {
   margin: 0;
+}
+
+.reward-configuration__notice {
+  margin: -10px 0 16px;
+  padding: 9px 13px;
+  color: #8b5a3e;
+  font-size: 11px;
+  font-weight: 650;
+  background: rgb(255 244 232 / 72%);
+  border: 1px solid rgb(214 132 79 / 16%);
+  border-radius: 12px;
 }
 
 .reward-configuration__header h2 {
@@ -851,8 +1161,10 @@ onMounted(() => {
 }
 
 .reward-card__front {
+  position: relative;
   padding: 0;
-  flex-direction: column;
+  background: rgb(248 250 247 / 24%);
+  backdrop-filter: blur(16px) saturate(0.82);
   cursor: pointer;
   transition: box-shadow 520ms ease;
 }
@@ -864,10 +1176,11 @@ onMounted(() => {
 }
 
 .reward-card__artwork {
-  position: relative;
+  position: absolute;
+  inset: 0;
   display: grid;
-  height: var(--reward-artwork-height);
-  flex: 0 0 var(--reward-artwork-height);
+  width: 100%;
+  height: 100%;
   overflow: hidden;
   background:
     radial-gradient(circle at 73% 21%, rgb(255 255 255 / 65%) 0 7%, transparent 26%),
@@ -897,9 +1210,75 @@ onMounted(() => {
 }
 
 .reward-card__artwork > img {
+  position: relative;
+  z-index: 1;
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.reward-card__product-image {
+  animation: reward-product-image-reveal 820ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.reward-card__image-loading {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  display: grid;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 72% 20%, rgb(255 255 255 / 60%), transparent 28%),
+    radial-gradient(circle at 20% 86%, color-mix(in srgb, var(--reward-primary) 25%, transparent), transparent 38%),
+    linear-gradient(135deg, color-mix(in srgb, var(--reward-secondary) 55%, white), rgb(245 247 242 / 78%));
+  grid-template-rows: auto auto;
+  align-content: center;
+  justify-items: center;
+  gap: 9px;
+  place-items: center;
+}
+
+.reward-card__image-loading::before {
+  position: absolute;
+  inset: -45% -70%;
+  background: linear-gradient(105deg, transparent 38%, rgb(255 255 255 / 38%) 49%, transparent 60%);
+  content: '';
+  animation: reward-image-shimmer 2.4s ease-in-out infinite;
+}
+
+.reward-card__image-loading-orbit {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  background: rgb(255 255 255 / 42%);
+  border: 1px solid rgb(255 255 255 / 66%);
+  border-radius: 50%;
+  box-shadow:
+    0 11px 24px rgb(73 68 58 / 8%),
+    0 0 0 8px rgb(255 255 255 / 13%);
+  place-items: center;
+  animation: reward-image-loader-breathe 1.8s ease-in-out infinite;
+}
+
+.reward-card__image-loading-orbit i {
+  width: 19px;
+  height: 19px;
+  border: 2px solid color-mix(in srgb, var(--reward-primary) 20%, transparent);
+  border-top-color: color-mix(in srgb, var(--reward-primary) 82%, var(--reward-ink));
+  border-radius: 50%;
+  animation: reward-image-spin 850ms linear infinite;
+}
+
+.reward-card__image-loading > small {
+  position: relative;
+  z-index: 1;
+  color: color-mix(in srgb, var(--reward-ink) 72%, #6f7872);
+  font-size: 10px;
+  font-weight: 720;
+  letter-spacing: 0.08em;
+  animation: reward-image-label-breathe 1.8s ease-in-out infinite;
 }
 
 .reward-card__artwork > svg {
@@ -931,11 +1310,21 @@ onMounted(() => {
 }
 
 .reward-card__content {
+  position: absolute;
+  z-index: 2;
+  right: 0;
+  bottom: 0;
+  left: 0;
   display: flex;
   min-height: 0;
-  padding: 15px 17px 14px;
-  flex: 1;
+  height: 116px;
+  padding: 11px 16px 12px;
   flex-direction: column;
+  background:
+    linear-gradient(145deg, rgb(255 255 255 / 43%), rgb(239 245 240 / 25%));
+  border-top: 1px solid rgb(255 255 255 / 45%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 28%);
+  backdrop-filter: blur(18px) saturate(0.82);
 }
 
 .reward-card__name-row {
@@ -955,8 +1344,8 @@ onMounted(() => {
 
 .reward-card__name-row > i {
   display: grid;
-  width: 30px;
-  height: 30px;
+  width: 27px;
+  height: 27px;
   flex: 0 0 auto;
   color: var(--reward-primary);
   background: color-mix(in srgb, var(--reward-primary) 10%, transparent);
@@ -985,7 +1374,7 @@ onMounted(() => {
   color: #7c8880;
   font-size: 12px;
   font-weight: 560;
-  line-height: 1.55;
+  line-height: 1.45;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
@@ -1025,6 +1414,7 @@ onMounted(() => {
   background:
     radial-gradient(circle at 100% 0, color-mix(in srgb, var(--reward-primary) 13%, transparent), transparent 34%),
     rgb(250 252 249 / 96%);
+  overflow: hidden;
   transform: rotateY(180deg);
 }
 
@@ -1053,6 +1443,20 @@ onMounted(() => {
     box-shadow 340ms ease,
     color 280ms ease,
     transform 380ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.reward-card__management-actions button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.reward-card__status-spinner {
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: reward-status-spin 720ms linear infinite;
 }
 
 .reward-card__editor-header > button:hover,
@@ -1100,11 +1504,6 @@ onMounted(() => {
 .reward-card__management-actions button.is-restore {
   color: #37816d;
   background: rgb(70 168 138 / 10%);
-}
-
-.reward-card__management-actions button.is-danger {
-  color: #b35d60;
-  background: rgb(205 91 96 / 8%);
 }
 
 .reward-card__management-actions button {
@@ -1323,15 +1722,20 @@ onMounted(() => {
   opacity: 1;
 }
 
+.reward-card__validation.is-confirming {
+  color: #b56e41;
+}
+
 .reward-card__editor-footer {
   display: grid;
   margin-top: 4px;
-  gap: 9px;
-  grid-template-columns: 0.72fr 1.28fr;
+  grid-template-columns: 1fr;
 }
 
-.reward-card__editor-footer button,
-.reward-card__delete-confirm button {
+.reward-card__editor-footer button {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
   height: 38px;
   color: #627068;
   font: inherit;
@@ -1342,9 +1746,21 @@ onMounted(() => {
   border: 1px solid rgb(66 87 75 / 10%);
   border-radius: 12px;
   cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
   transition:
+    color 320ms ease,
+    background 420ms ease,
+    border-color 320ms ease,
     box-shadow 320ms ease,
     transform 380ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.reward-card__editor-footer button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+  transform: none;
 }
 
 .reward-card__editor-footer button:last-child {
@@ -1354,81 +1770,34 @@ onMounted(() => {
   box-shadow: 0 10px 20px color-mix(in srgb, var(--reward-primary) 22%, transparent);
 }
 
-.reward-card__editor-footer button:hover,
-.reward-card__delete-confirm button:hover {
+.reward-card__editor-footer button.is-confirming {
+  color: var(--reward-ink);
+  background:
+    linear-gradient(135deg, rgb(255 255 255 / 90%), rgb(255 255 255 / 68%)),
+    var(--reward-secondary);
+  border-color: color-mix(in srgb, var(--reward-primary) 34%, white);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--reward-primary) 8%, transparent),
+    0 10px 22px color-mix(in srgb, var(--reward-primary) 18%, transparent);
+  transform: translateY(-1px) scale(1.012);
+}
+
+.reward-card__save-progress {
+  position: absolute;
+  z-index: 1;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 3px;
+  background: var(--reward-primary);
+  border-radius: 999px;
+  transform-origin: left center;
+  animation: reward-save-confirmation-countdown 3s linear forwards;
+}
+
+.reward-card__editor-footer button:hover {
   box-shadow: 0 10px 20px rgb(48 65 54 / 12%);
   transform: translateY(-2px);
-}
-
-.reward-card__delete-confirm {
-  position: absolute;
-  z-index: 8;
-  inset: 0;
-  display: flex;
-  padding: 30px;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  background: rgb(249 250 248 / 92%);
-  backdrop-filter: blur(16px);
-  flex-direction: column;
-}
-
-.reward-card__delete-confirm > span {
-  display: grid;
-  width: 54px;
-  height: 54px;
-  color: #b75e62;
-  background: rgb(203 83 90 / 10%);
-  border-radius: 18px;
-  place-items: center;
-}
-
-.reward-card__delete-confirm svg {
-  width: 26px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.7;
-}
-
-.reward-card__delete-confirm h4 {
-  margin: 17px 0 0;
-  font-size: 18px;
-}
-
-.reward-card__delete-confirm p {
-  margin: 8px 0 20px;
-  color: #808b84;
-  font-size: 11px;
-  font-weight: 560;
-}
-
-.reward-card__delete-confirm div {
-  display: grid;
-  width: min(270px, 100%);
-  gap: 9px;
-  grid-template-columns: 1fr 1fr;
-}
-
-.reward-card__delete-confirm button:last-child {
-  color: white;
-  background: #b85f63;
-  border-color: transparent;
-}
-
-.reward-delete-confirm-enter-active,
-.reward-delete-confirm-leave-active {
-  transition:
-    opacity 320ms ease,
-    backdrop-filter 320ms ease;
-}
-
-.reward-delete-confirm-enter-from,
-.reward-delete-confirm-leave-to {
-  opacity: 0;
-  backdrop-filter: blur(0);
 }
 
 .reward-create-sheet-enter-active,
@@ -1470,12 +1839,114 @@ onMounted(() => {
   place-items: center;
 }
 
+.reward-configuration__state {
+  display: grid;
+  min-height: 260px;
+  align-content: center;
+  justify-items: center;
+  gap: 13px;
+  color: #7e8a82;
+  text-align: center;
+}
+
+.reward-configuration__state p {
+  max-width: 430px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.reward-configuration__state > button {
+  padding: 8px 15px;
+  color: #925a3e;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 730;
+  background: rgb(255 255 255 / 68%);
+  border: 1px solid rgb(211 126 78 / 24%);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.reward-configuration__state--loading > span {
+  display: flex;
+  height: 22px;
+  align-items: flex-end;
+  gap: 5px;
+}
+
+.reward-configuration__state--loading i {
+  width: 6px;
+  height: 6px;
+  background: #d78a5e;
+  border-radius: 50%;
+  animation: reward-list-loading-dot 900ms ease-in-out infinite alternate;
+}
+
+.reward-configuration__state--loading i:nth-child(2) {
+  animation-delay: 120ms;
+}
+
+.reward-configuration__state--loading i:nth-child(3) {
+  animation-delay: 240ms;
+}
+
+@keyframes reward-product-image-reveal {
+  from {
+    opacity: 0;
+    filter: blur(14px) saturate(0.7);
+    transform: scale(1.045);
+  }
+}
+
+@keyframes reward-image-spin {
+  to { transform: rotate(1turn); }
+}
+
+@keyframes reward-image-shimmer {
+  0%, 16% { transform: translateX(-34%); }
+  72%, 100% { transform: translateX(34%); }
+}
+
+@keyframes reward-image-loader-breathe {
+  50% {
+    box-shadow:
+      0 14px 29px rgb(73 68 58 / 11%),
+      0 0 0 13px rgb(255 255 255 / 8%);
+    transform: scale(1.045);
+  }
+}
+
+@keyframes reward-image-label-breathe {
+  50% { opacity: 0.58; }
+}
+
+@keyframes reward-list-loading-dot {
+  to { transform: translateY(-8px); }
+}
+
+@keyframes reward-status-spin {
+  to { transform: rotate(1turn); }
+}
+
+@keyframes reward-save-confirmation-countdown {
+  to { transform: scaleX(0); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .reward-card,
   .reward-card__inner,
   .reward-card-slot,
   .reward-create-card-slot,
   .reward-create-card,
+  .reward-card__product-image,
+  .reward-card__image-loading::before,
+  .reward-card__image-loading-orbit,
+  .reward-card__image-loading-orbit i,
+  .reward-card__image-loading > small,
+  .reward-card__status-spinner,
+  .reward-card__save-progress,
+  .reward-configuration__state--loading i,
   .reward-configuration__grid,
   .reward-list-move {
     animation: none;

@@ -67,6 +67,6 @@ import FloatingSportIcons from './components/visual/FloatingSportIcons.vue'
 
 ## 依赖与关联代码
 
-- 图标资源：`src/assets/icon/*.png`
+- 图标资源：`src/assets/icon/*.webp`
 - 组件代码：`src/components/visual/FloatingSportIcons.vue`
 - 当前调用方：`src/components/visual/FlowingGradientBackground.vue`

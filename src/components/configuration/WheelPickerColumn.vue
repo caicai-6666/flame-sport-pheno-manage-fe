@@ -16,6 +16,10 @@ const props = defineProps({
     type: String,
     required: true,
   },
+  disabled: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits(['update:modelValue'])
@@ -33,11 +37,13 @@ function scrollToValue(value, behavior = 'auto') {
 }
 
 function selectOption(option) {
+  if (props.disabled) return
   emit('update:modelValue', option.value)
   scrollToValue(option.value, 'smooth')
 }
 
 function syncValueFromScroll() {
+  if (props.disabled) return
   window.cancelAnimationFrame(scrollFrameId)
   scrollFrameId = window.requestAnimationFrame(() => {
     if (!scrollRef.value || props.options.length === 0) return
@@ -53,6 +59,7 @@ function syncValueFromScroll() {
 }
 
 function moveSelection(offset) {
+  if (props.disabled) return
   const currentIndex = findValueIndex(props.modelValue)
   const nextIndex = Math.min(Math.max(currentIndex + offset, 0), props.options.length - 1)
   const nextOption = props.options[nextIndex]
@@ -91,12 +98,18 @@ onBeforeUnmount(() => window.cancelAnimationFrame(scrollFrameId))
   <div
     class="wheel-picker-column"
     role="listbox"
-    tabindex="0"
+    :tabindex="disabled ? -1 : 0"
     :aria-label="ariaLabel"
+    :aria-disabled="disabled"
     :aria-activedescendant="`${ariaLabel}-${modelValue}`"
     @keydown="handleKeydown"
   >
-    <div ref="scrollRef" class="wheel-picker-column__scroll" @scroll.passive="syncValueFromScroll">
+    <div
+      ref="scrollRef"
+      class="wheel-picker-column__scroll"
+      :class="{ 'is-disabled': disabled }"
+      @scroll.passive="syncValueFromScroll"
+    >
       <button
         v-for="option in options"
         :id="`${ariaLabel}-${option.value}`"
@@ -104,6 +117,7 @@ onBeforeUnmount(() => window.cancelAnimationFrame(scrollFrameId))
         type="button"
         role="option"
         tabindex="-1"
+        :disabled="disabled"
         :aria-selected="Object.is(option.value, modelValue)"
         :class="{ 'is-selected': Object.is(option.value, modelValue) }"
         @click="selectOption(option)"
@@ -131,6 +145,15 @@ onBeforeUnmount(() => window.cancelAnimationFrame(scrollFrameId))
 .wheel-picker-column:focus-visible {
   outline: 3px solid rgb(112 99 210 / 24%);
   outline-offset: 2px;
+}
+
+.wheel-picker-column[aria-disabled='true'] {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.wheel-picker-column__scroll.is-disabled {
+  overflow-y: hidden;
 }
 
 .wheel-picker-column__scroll {
