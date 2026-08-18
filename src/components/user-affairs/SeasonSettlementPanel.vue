@@ -23,6 +23,7 @@ import SettlementFinalizeDialog from './SettlementFinalizeDialog.vue'
 
 const ISSUE_CONFIRMATION_TIMEOUT_MS = 3000
 const SETTLEMENT_CARD_FLIP_DURATION_MS = 620
+const NO_SETTLEMENT_SEASON_MESSAGE = '当前没有结算中的赛季'
 
 const props = defineProps({
   userProfileCatalog: {
@@ -83,6 +84,9 @@ const canExport = computed(
     && settlementRecords.value.every((record) => record.pointsIssued),
 )
 const isIssuingPoints = computed(() => issuingRecordIds.value.size > 0)
+const showInlineLoadRetry = computed(
+  () => Boolean(loadError.value) && loadError.value !== NO_SETTLEMENT_SEASON_MESSAGE,
+)
 
 function clearAvatarImages() {
   avatarRequestController?.abort()
@@ -138,7 +142,7 @@ function closeFinalizeDialog() {
   loadNotice.value = ''
   exportError.value = ''
   completionNotice.value = `${completedSeasonName} 已完成结算：自动拒绝 ${completedResult.rejectedProofCount} 条凭证，新增定分 ${completedResult.finalizedUserCount} 人，新增发放 ${completedResult.issuedUserCount} 人。`
-  loadError.value = '当前没有结算中的赛季'
+  loadError.value = NO_SETTLEMENT_SEASON_MESSAGE
 }
 
 async function handleFinalizeConfirmed() {
@@ -287,7 +291,7 @@ function resolveLoadError(error) {
   if (!(error instanceof SettlementRequestError)) {
     return '赛季结算数据获取失败，请稍后重试'
   }
-  if (error.status === 404) return '当前没有结算中的赛季'
+  if (error.status === 404) return NO_SETTLEMENT_SEASON_MESSAGE
   if (error.status === 409) return '存在多个结算中赛季，暂时无法确定结算范围'
   return error.message
 }
@@ -847,7 +851,8 @@ defineExpose({ closePendingReview })
     <div v-else-if="loadError" class="settlement-state" role="alert">
       <strong>{{ loadError }}</strong>
       <small>请确认赛季状态或稍后重试</small>
-      <button type="button" @click="loadSettlement">重新获取</button>
+      <!-- 无结算赛季时顶部刷新图标已经足够，其他异常才保留就地重试。 -->
+      <button v-if="showInlineLoadRetry" type="button" @click="loadSettlement">重新获取</button>
     </div>
 
     <div v-else-if="settlementRecords.length === 0" class="settlement-state" role="status">
