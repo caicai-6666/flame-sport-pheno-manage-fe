@@ -27,6 +27,7 @@ let avatarApi
 let memberAvatarLoader
 let projectIconApi
 let projectIconLoader
+let posterApi
 let pendingFinalReviewApi
 let pendingFinalReviewLoader
 let pendingFinalReviewDashboard
@@ -123,6 +124,7 @@ before(async () => {
   projectIconLoader = await viteServer.ssrLoadModule(
     '/src/services/projectIconLoader.js',
   )
+  posterApi = await viteServer.ssrLoadModule('/src/api/image/posterApi.js')
   pendingFinalReviewApi = await viteServer.ssrLoadModule(
     '/src/api/proof/pendingFinalReviewApi.js',
   )
@@ -3161,6 +3163,97 @@ test('项目图标接口保留历史路径并返回经过媒体类型校验的�
   )
   assert.equal(blob.type, 'image/png;charset=binary')
   assert.equal(blob.size, 4)
+})
+
+test('活动海报接口通过固定路径读取无缓存的 WebP 二进制', async () => {
+  adminSession.saveAdminSession({
+    accessToken: 'poster-token',
+    tokenType: 'bearer',
+    expiresIn: 28800,
+  })
+
+  let capturedRequest
+  globalThis.fetch = async (url, options) => {
+    capturedRequest = { url, options }
+    return new Response(new Uint8Array([82, 73, 70, 70]), {
+      status: 200,
+      headers: { 'Content-Type': 'image/webp' },
+    })
+  }
+
+  const blob = await posterApi.getPosterImage()
+
+  assert.equal(capturedRequest.url, '/dev/flame/admin/api/image/poster')
+  assert.equal(capturedRequest.options.method, 'GET')
+  assert.equal(capturedRequest.options.cache, 'no-store')
+  assert.equal(capturedRequest.options.headers.get('Authorization'), 'Bearer poster-token')
+  assert.equal(capturedRequest.options.headers.get('Accept'), 'image/webp')
+  assert.equal(blob.type, 'image/webp')
+  assert.equal(blob.size, 4)
+})
+
+test('更换活动海报时使用浏览器生成的 multipart 边界并校验响应', async () => {
+  adminSession.saveAdminSession({
+    accessToken: 'poster-token',
+    tokenType: 'bearer',
+    expiresIn: 28800,
+  })
+
+  let capturedRequest
+  globalThis.fetch = async (url, options) => {
+    capturedRequest = { url, options }
+    return new Response(
+      JSON.stringify({ image_url: '/活动规则.webp', size_bytes: 470258 }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )
+  }
+
+  const file = new File([new Uint8Array([82, 73, 70, 70])], 'activity-poster.webp', {
+    type: 'image/webp',
+  })
+  const result = await posterApi.updatePosterImage(file)
+
+  assert.equal(capturedRequest.url, '/dev/flame/admin/api/image/poster')
+  assert.equal(capturedRequest.options.method, 'POST')
+  assert.equal(capturedRequest.options.headers.get('Authorization'), 'Bearer poster-token')
+  assert.equal(capturedRequest.options.headers.has('Content-Type'), false)
+  assert.ok(capturedRequest.options.body instanceof FormData)
+  assert.equal(capturedRequest.options.body.get('image').name, 'activity-poster.webp')
+  assert.equal(capturedRequest.options.body.get('image').type, 'image/webp')
+  assert.deepEqual(result, { imageUrl: '/活动规则.webp', sizeBytes: 470258 })
+})
+
+test('活动海报接口拒绝错误媒体类型和超出限制的上传文件', async () => {
+  adminSession.saveAdminSession({
+    accessToken: 'poster-token',
+    tokenType: 'bearer',
+    expiresIn: 28800,
+  })
+
+  globalThis.fetch = async () =>
+    new Response(new Uint8Array([137, 80, 78, 71]), {
+      status: 200,
+      headers: { 'Content-Type': 'image/png' },
+    })
+
+  await assert.rejects(
+    () => posterApi.getPosterImage(),
+    (error) => error.name === 'PosterRequestError' && error.status === 502,
+  )
+  await assert.rejects(
+    () => posterApi.updatePosterImage(
+      new File([new Uint8Array([1])], 'poster.gif', { type: 'image/gif' }),
+    ),
+    (error) => error.name === 'PosterRequestError' && error.status === 400,
+  )
+  await assert.rejects(
+    () => posterApi.updatePosterImage(
+      new File([new Uint8Array(10 * 1024 * 1024 + 1)], 'poster.png', {
+        type: 'image/png',
+      }),
+    ),
+    (error) => error.name === 'PosterRequestError' && error.status === 413,
+  )
 })
 
 test('项目图标加载最多并发 5 个，去重相同地址并重试瞬时错误', async () => {

@@ -13,6 +13,7 @@
 - 通过受保护的赛季列表接口读取全部赛季，保留后端 `start_date DESC, end_date DESC, id DESC` 顺序。
 - 组件首次挂载时请求列表；平台配置尚未进入时不提前挂载，首次查询后由两层 `KeepAlive` 保留组件和数据。
 - 区分加载、空列表与失败状态；失败时保留错误提示和重试入口。
+- 在“全部赛季”标题右侧提供“查看赛季海报”入口；海报查看器通过 `Teleport` 挂载到页面根层，不受赛季容器裁剪。
 - 在赛季网格第一位展示独立的“新建赛季”加号入口，该入口不计入赛季总数；点击后从容器底部升起新建表单。
 - 新建表单校验通过后调用真实创建接口，服务端返回 `201` 后使用其 ID、状态和实际项目数插入赛季卡片。
 - 查找所有已有赛季中最晚的结束日期，并将其下一天传给新建表单作为开始日期下限。
@@ -65,6 +66,8 @@
 - “进行中”状态展示白底高对比状态胶囊、呼吸圆点、流动封面光带和缓慢呼吸的双层边缘光；“结算中”保留独立暖色边框与静态暖色圆点，避免与当前赛季争夺视觉焦点。
 - 进行中赛季的 PixiJS 流体常驻更高流速、轨道幅度、色彩浓度和双层位移强度；悬停时继续叠加增强，其他状态保持较慢的背景流动。
 - 赛季卡片不提供翻面或详情层；当前唯一可点击卡片是“新建赛季”入口。
+- 海报按钮打开工作台级弹窗；长海报只能在固定高度预览区内滚动，不参与赛季网格尺寸计算。
+- 选择新海报后先在浏览器中限制尺寸、压缩并转换为 WebP，展示处理结果后再确认覆盖。
 - 系统启用减少动态效果时，停止入场、漂移和呼吸动画。
 - 系统启用减少动态效果时，PixiJS 液体层保留静态构图，不持续刷新画布。
 
@@ -86,6 +89,10 @@
 - 组件代码：`src/components/configuration/SeasonBasicConfiguration.vue`
 - 页面容器：`src/components/configuration/PlatformConfigurationPage.vue`
 - 新建赛季表单：`src/components/configuration/SeasonCreateSheet.vue`
+- 海报查看与更换弹窗：`src/components/configuration/SeasonPosterDialog.vue`
+- 海报接口：`src/api/image/posterApi.js`
+- 海报前端处理：`src/utils/posterImageProcessor.js`
+- 海报接口说明：`description/api/image/poster.md`
 - 液体卡片表面：`src/components/configuration/PixiSeasonLiquidSurface.vue`
 - 液体卡片说明：`description/components/configuration/PixiSeasonLiquidSurface.md`
 - 赛季列表接口：`src/api/season/seasonListApi.js`

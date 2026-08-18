@@ -108,6 +108,7 @@ description/
 - [`components/configuration/RewardConfiguration.md`](components/configuration/RewardConfiguration.md)：按积分升序展示并支持翻面编辑与上下架的奖品配置卡片。
 - [`components/configuration/RewardCreateSheet.md`](components/configuration/RewardCreateSheet.md)：采集商品名称、描述、积分和图片的新增商品表单。
 - [`components/configuration/SeasonBasicConfiguration.md`](components/configuration/SeasonBasicConfiguration.md)：当前赛季与历史赛季的卡片式概览。
+- [`components/configuration/SeasonPosterDialog.md`](components/configuration/SeasonPosterDialog.md)：脱离赛季容器查看长海报，并在前端压缩转换后更换全局活动海报。
 - [`components/configuration/PixiSeasonLiquidSurface.md`](components/configuration/PixiSeasonLiquidSurface.md)：使用稳定随机参数和按需 PixiJS 渲染的赛季卡片液体表面。
 - [`components/configuration/SeasonCreateSheet.md`](components/configuration/SeasonCreateSheet.md)：从赛季容器底部升起的新建赛季表单。
 - [`components/configuration/SeasonProjectEnrollmentChart.md`](components/configuration/SeasonProjectEnrollmentChart.md)：预留的赛季各运动项目参与人数横向柱状图，当前未挂载。
@@ -162,6 +163,7 @@ description/
 - [`api/product/reward-delivery.md`](api/product/reward-delivery.md)：查询待发放兑换流水，复用用户目录并受控补齐历史奖品信息。
 - [`api/user/user-info.md`](api/user/user-info.md)：按正式参赛用户 ID 批量查询姓名、部门和头像的只读接口。
 - [`api/image/avatar.md`](api/image/avatar.md)：通过管理端后端安全中转用户头像二进制，并限制并发与自动重试。
+- [`api/image/poster.md`](api/image/poster.md)：读取全局活动海报，并在浏览器压缩转换为 WebP 后执行覆盖。
 - [`api/image/project-icon.md`](api/image/project-icon.md)：通过管理端后端安全中转项目图标，并渐进加载到项目报名图表。
 - [`api/image/proof-record.md`](api/image/proof-record.md)：通过凭证 ID 安全中转运动凭证图片，并按审核进度分批预取。
 - [`api/suggestion/suggestion-list.md`](api/suggestion/suggestion-list.md)：获取可见用户意见，并渐进加载提交用户头像。

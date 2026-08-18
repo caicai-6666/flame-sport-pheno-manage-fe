@@ -16,6 +16,10 @@
 
 赛季网格第一位固定展示“新建赛季”加号入口，并与实际赛季数量分开统计。点击后，表单从“全部赛季”容器底部升起，背景列表停止交互。
 
+“全部赛季”标题右侧提供“查看赛季海报”入口。该入口读取全局唯一活动海报，并通过页面根层的固定弹窗展示，不局限于赛季内容容器。海报预览区具有稳定视口高度，长图保持比例并在区域内部滚动，不会撑大赛季网格。滚轮输入经过单位归一化和单帧限速，加载圆圈固定居中，图片解码完成后缓慢浮现。
+
+管理员可以选择 JPEG、PNG 或 WebP 新海报。前端先校验 10 MiB 上限，在 Canvas 中限制尺寸与像素量，按多档质量压缩并转换为保留透明通道的 WebP；确认上传前展示处理后的尺寸和体积变化。更换按钮要求在 3 秒内二次点击，确认态通过颜色、缩放、文案和倒计时线平滑切换；重新选择文件或超时会取消确认。服务端成功覆盖后，页面重新读取最终 WebP，不沿用本地预览结果。
+
 新建表单当前包含：
 
 - 赛季名称。
@@ -54,6 +58,7 @@
 
 - 赛季列表已使用真实接口数据。
 - 新建赛季已使用真实接口，创建请求不自动重试。
+- 活动海报读取与更换已使用真实接口；上传前在浏览器中压缩并转换为 WebP。
 - 暂未接入编辑、删除和状态变更。
 - 赛季卡片当前不提供详情查看或进一步跳转。
 
@@ -64,6 +69,8 @@
 - 组件说明：`description/components/configuration/SeasonBasicConfiguration.md`
 - 液体卡片表面：`description/components/configuration/PixiSeasonLiquidSurface.md`
 - 新建表单：`description/components/configuration/SeasonCreateSheet.md`
+- 海报弹窗：`description/components/configuration/SeasonPosterDialog.md`
+- 海报接口：`description/api/image/poster.md`
 - 赛季列表接口：`description/api/season/season-list.md`
 - 赛季创建接口：`description/api/season/season-create.md`
 - 平台配置说明：`description/features/platform-configuration.md`

@@ -10,6 +10,7 @@ import {
 } from '../../api/season/seasonListApi.js'
 import PixiSeasonLiquidSurface from './PixiSeasonLiquidSurface.vue'
 import SeasonCreateSheet from './SeasonCreateSheet.vue'
+import SeasonPosterDialog from './SeasonPosterDialog.vue'
 
 const props = defineProps({
   visibleProjectCount: {
@@ -108,6 +109,7 @@ const minimumNewSeasonStartDate = computed(() => {
 const maximumRequiredProjectCount = computed(() => Math.min(props.visibleProjectCount, 255))
 
 const isCreateSheetOpen = ref(false)
+const isPosterDialogOpen = ref(false)
 const isSeasonCreating = ref(false)
 const seasonCreateError = ref('')
 
@@ -121,6 +123,15 @@ function closeCreateSheet() {
   if (isSeasonCreating.value) return
   seasonCreateError.value = ''
   isCreateSheetOpen.value = false
+}
+
+function openPosterDialog() {
+  if (isCreateSheetOpen.value) return
+  isPosterDialogOpen.value = true
+}
+
+function closePosterDialog() {
+  isPosterDialogOpen.value = false
 }
 
 function compareSeasonsByLatest(left, right) {
@@ -183,13 +194,21 @@ onBeforeUnmount(() => {
   <section class="season-configuration" aria-label="全部赛季">
     <div
       class="season-configuration__scroll"
-      :inert="isCreateSheetOpen"
+      :inert="isCreateSheetOpen || isPosterDialogOpen"
     >
       <header class="season-configuration__header">
         <h2>全部赛季</h2>
-        <span v-if="isSeasonListLoading">正在同步</span>
-        <span v-else-if="seasonListError">同步失败</span>
-        <span v-else>{{ seasons.length }} 个赛季</span>
+        <div class="season-configuration__header-actions">
+          <button type="button" @click="openPosterDialog">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 5h16v14H4zM7 15l3.5-4 2.6 3 1.8-2 2.8 3.2M8 8.5h.01" />
+            </svg>
+            查看赛季海报
+          </button>
+          <span v-if="isSeasonListLoading">正在同步</span>
+          <span v-else-if="seasonListError">同步失败</span>
+          <span v-else>{{ seasons.length }} 个赛季</span>
+        </div>
       </header>
 
       <div class="season-configuration__grid">
@@ -304,6 +323,16 @@ onBeforeUnmount(() => {
         @submit="handleCreateSubmit"
       />
     </Transition>
+
+    <!-- 海报是工作台级查看器，通过 Teleport 脱离“全部赛季”的裁剪和定位上下文。 -->
+    <Teleport to="body">
+      <Transition name="season-poster">
+        <SeasonPosterDialog
+          v-if="isPosterDialogOpen"
+          @close="closePosterDialog"
+        />
+      </Transition>
+    </Teleport>
   </section>
 </template>
 
@@ -338,7 +367,13 @@ onBeforeUnmount(() => {
   letter-spacing: -0.03em;
 }
 
-.season-configuration__header span {
+.season-configuration__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.season-configuration__header-actions > span {
   padding: 7px 11px;
   color: #69756e;
   font-size: 12px;
@@ -347,6 +382,67 @@ onBeforeUnmount(() => {
   border: 1px solid rgb(255 255 255 / 72%);
   border-radius: 999px;
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 78%);
+}
+
+.season-configuration__header-actions > button {
+  display: inline-flex;
+  min-height: 34px;
+  padding: 0 12px;
+  align-items: center;
+  gap: 7px;
+  color: #6458ba;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 740;
+  background: linear-gradient(145deg, rgb(255 255 255 / 72%), rgb(239 239 250 / 62%));
+  border: 1px solid rgb(110 97 198 / 16%);
+  border-radius: 999px;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 82%),
+    0 7px 16px rgb(75 67 134 / 8%);
+  cursor: pointer;
+  transition:
+    box-shadow 320ms ease,
+    transform 360ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.season-configuration__header-actions > button svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.65;
+}
+
+.season-configuration__header-actions > button:focus-visible {
+  outline: 3px solid rgb(111 98 202 / 26%);
+  outline-offset: 2px;
+}
+
+.season-poster-enter-active,
+.season-poster-leave-active {
+  transition: opacity 280ms ease;
+}
+
+.season-poster-enter-active :deep(.season-poster-dialog),
+.season-poster-leave-active :deep(.season-poster-dialog) {
+  transition:
+    opacity 300ms ease,
+    transform 480ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.season-poster-enter-from,
+.season-poster-leave-to,
+.season-poster-enter-from :deep(.season-poster-dialog),
+.season-poster-leave-to :deep(.season-poster-dialog) {
+  opacity: 0;
+}
+
+.season-poster-enter-from :deep(.season-poster-dialog),
+.season-poster-leave-to :deep(.season-poster-dialog) {
+  transform: translateY(14px) scale(0.98);
 }
 
 .season-configuration__grid {
@@ -807,6 +903,13 @@ onBeforeUnmount(() => {
 }
 
 @media (hover: hover) {
+  .season-configuration__header-actions > button:hover {
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 90%),
+      0 11px 22px rgb(75 67 134 / 14%);
+    transform: translateY(-2px);
+  }
+
   .season-create-card:hover:not(:disabled) {
     color: #554a96;
     background:
@@ -866,6 +969,16 @@ onBeforeUnmount(() => {
     min-height: 232px;
   }
 
+  .season-configuration__header {
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .season-configuration__header-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -888,6 +1001,14 @@ onBeforeUnmount(() => {
   }
 
   .season-create-card__plus {
+    transition: none;
+  }
+
+  .season-configuration__header-actions > button,
+  .season-poster-enter-active,
+  .season-poster-leave-active,
+  .season-poster-enter-active :deep(.season-poster-dialog),
+  .season-poster-leave-active :deep(.season-poster-dialog) {
     transition: none;
   }
 
