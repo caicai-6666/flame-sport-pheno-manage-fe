@@ -88,7 +88,7 @@ export async function buildSeasonPointDistributionWorkbook(season, records) {
   const excelJsModule = await import('exceljs')
   const ExcelJS = excelJsModule.default ?? excelJsModule
   const workbook = new ExcelJS.Workbook()
-  const worksheet = workbook.addWorksheet('积分发放明细', {
+  const worksheet = workbook.addWorksheet('赛季结算明细', {
     properties: { tabColor: { argb: HEADER_FILL } },
   })
 
@@ -100,9 +100,9 @@ export async function buildSeasonPointDistributionWorkbook(season, records) {
   for (let projectIndex = 0; projectIndex < projectCount; projectIndex += 1) {
     headers.push(`项目 ${projectIndex + 1}`, `项目 ${projectIndex + 1} 进度`)
   }
-  headers.push('发放积分', '发放状态')
+  headers.push('结算积分', '积分状态')
 
-  worksheet.getCell(1, 1).value = `${season.name}积分发放明细`
+  worksheet.getCell(1, 1).value = `${season.name}赛季结算明细`
   worksheet.getCell(2, 1).value = `赛季周期：${season.period}`
   worksheet.getRow(4).values = headers
 
@@ -114,7 +114,12 @@ export async function buildSeasonPointDistributionWorkbook(season, records) {
       values.push(project?.name ?? '', project ? project.progress / 100 : '')
     }
 
-    values.push(record.finalPoints, record.distributed ? '已发放' : '未发放')
+    const pointsStatus = record.finalPoints === null
+      ? '待终审'
+      : record.distributed
+        ? '已发放'
+        : '待发放'
+    values.push(record.finalPoints ?? '', pointsStatus)
     worksheet.getRow(recordIndex + 5).values = values
   })
 
@@ -131,7 +136,7 @@ export async function exportSeasonPointDistribution(season, records) {
   const downloadUrl = URL.createObjectURL(blob)
   const downloadLink = document.createElement('a')
   downloadLink.href = downloadUrl
-  downloadLink.download = `${sanitizeFileName(season.name)}-积分发放明细.xlsx`
+  downloadLink.download = `${sanitizeFileName(season.name)}-赛季结算明细.xlsx`
   document.body.append(downloadLink)
   downloadLink.click()
   downloadLink.remove()

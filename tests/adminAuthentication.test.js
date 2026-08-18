@@ -980,6 +980,7 @@ test('项目列表接口返回完整目录，数据看板只用启用项目建�
   assert.deepEqual(emptyView.membersByProject, {
     '跑步/快走': [],
   })
+  assert.deepEqual(emptyView.projectProgressesByUserId, {})
 })
 
 test('项目列表接口接受空数组，并拒绝缺少状态或重复主键的响应', async () => {
@@ -1388,6 +1389,20 @@ test('项目参赛组合最多并发 5 个并聚合真实人数、等级和进�
     enrollmentView.membersByProject.健身打卡.map((member) => member.id),
     ['user-1', 'user-3', 'user-5'],
   )
+  assert.deepEqual(enrollmentView.projectProgressesByUserId['user-1'], [
+    { projectId: 5, projectName: '跑步/快走', progress: 10 },
+    { projectId: 6, projectName: '健身打卡', progress: 10 },
+  ])
+  assert.deepEqual(enrollmentView.projectProgressesByUserId['user-2'], [
+    { projectId: 5, projectName: '跑步/快走', progress: 20 },
+  ])
+
+  const levelMembers = projectEnrollmentDashboard.attachProjectProgressesToMembers(
+    userMembers.slice(0, 2),
+    enrollmentView.projectProgressesByUserId,
+  )
+  assert.equal(levelMembers[0].projectProgresses.length, 2)
+  assert.equal(levelMembers[1].projectProgresses[0].progress, 20)
 })
 
 test('待终审接口携带参赛记录参数并适配凭证字段', async () => {
@@ -2846,6 +2861,73 @@ test('全局用户目录只查询尚未保存的兑换用户并组合待发放�
   assert.equal(view[0].meta, '08月12日 09:30')
   assert.equal(requestedUserIdGroups.length, 2)
   assert.deepEqual(members.map((member) => member.id), ['user-2', 'user-3'])
+})
+
+test('全局用户目录建立 season_user_id 到结算用户资料的稳定关系', async () => {
+  const catalog = userProfileCatalog.createUserProfileCatalog()
+  catalog.saveSeasonUserProfiles([
+    {
+      seasonUserId: 78,
+      userId: 'user-78',
+      userName: '张三',
+      departmentName: '研发部',
+      avatarUrl: '/avatar/user-78.webp',
+    },
+    {
+      seasonUserId: 79,
+      userId: 'user-79',
+      userName: '李四',
+      departmentName: '产品部',
+      avatarUrl: null,
+    },
+  ])
+
+  assert.deepEqual(catalog.getUserBySeasonUserId(78), {
+    id: 'user-78',
+    name: '张三',
+    department: '研发部',
+    avatarUrl: '/avatar/user-78.webp',
+  })
+  assert.deepEqual(
+    catalog.getUsersBySeasonUserIds([79, 78, 404]).map((entry) => ({
+      seasonUserId: entry.seasonUserId,
+      userId: entry.userId,
+    })),
+    [
+      { seasonUserId: 79, userId: 'user-79' },
+      { seasonUserId: 78, userId: 'user-78' },
+    ],
+  )
+
+  // 结算接口已写入的用户可以直接复用，不应再次进入用户详情请求。
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => {
+    throw new Error('不应重复请求用户详情')
+  }
+  try {
+    const cachedMembers = await catalog.getOrLoad(['user-78', 'user-79'])
+    assert.deepEqual(cachedMembers.map((member) => member.id), ['user-78', 'user-79'])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('赛季参赛记录归属冲突时整批关系都不写入', () => {
+  const catalog = userProfileCatalog.createUserProfileCatalog()
+  catalog.linkSeasonUsers([{ seasonUserId: 78, userId: 'user-78' }])
+  catalog.save([{ id: 'user-79', name: '李四', department: '产品部', avatarUrl: null }])
+
+  assert.throws(
+    () => catalog.linkSeasonUsers([
+      { seasonUserId: 79, userId: 'user-79' },
+      { seasonUserId: 78, userId: 'another-user' },
+    ]),
+    /用户归属不一致/,
+  )
+  assert.equal(catalog.getUserBySeasonUserId(79), null)
+
+  catalog.clear()
+  assert.equal(catalog.getUserBySeasonUserId(78), null)
 })
 
 test('待终审记录最多并发 5 个、重试瞬时错误并按全局口径倒序', async () => {

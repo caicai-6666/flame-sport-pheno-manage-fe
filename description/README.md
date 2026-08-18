@@ -65,6 +65,7 @@ description/
 - [`architecture/docker-compose-deployment.md`](architecture/docker-compose-deployment.md)：管理端前端容器构建、同源 API 转发、缓存策略和生产入口约定。
 - [`architecture/page-zoom-guard.md`](architecture/page-zoom-guard.md)：管理端页面缩放限制及浏览器边界。
 - [`architecture/page-scroll-boundary.md`](architecture/page-scroll-boundary.md)：根页面锁定与内部业务容器的滚动边界。
+- [`architecture/user-profile-catalog.md`](architecture/user-profile-catalog.md)：工作台用户资料缓存及 `season_user_id` 到用户信息的关系模型。
 
 ### 功能文档
 
@@ -99,12 +100,15 @@ description/
 - [`components/auth/AccessKeyLoginCard.md`](components/auth/AccessKeyLoginCard.md)：管理端单密钥登录卡片。
 - [`components/configuration/PlatformConfigurationPage.md`](components/configuration/PlatformConfigurationPage.md)：平台配置模块的页面骨架与配置域概览。
 - [`components/configuration/ChallengeLevelConfiguration.md`](components/configuration/ChallengeLevelConfiguration.md)：挑战等级名称与达成奖励积分的卡片式概览。
+- [`components/configuration/PixiChallengeLevelAura.md`](components/configuration/PixiChallengeLevelAura.md)：按等级材质色调绘制多层液态等高线徽章。
 - [`components/configuration/ChallengeLevelCreateSheet.md`](components/configuration/ChallengeLevelCreateSheet.md)：从等级容器底部升起的新增挑战等级表单。
 - [`components/configuration/SportProjectConfiguration.md`](components/configuration/SportProjectConfiguration.md)：运动项目卡片及放大翻转后的各等级规则概览。
+- [`components/configuration/PixiProjectGalaxy.md`](components/configuration/PixiProjectGalaxy.md)：为运动项目卡片绘制按项目稳定变化的彩色流动星河。
 - [`components/configuration/SportProjectCreateSheet.md`](components/configuration/SportProjectCreateSheet.md)：项目资料、等级规则与凭证上传配置组成的三步新建表单。
 - [`components/configuration/RewardConfiguration.md`](components/configuration/RewardConfiguration.md)：按积分升序展示并支持翻面编辑与上下架的奖品配置卡片。
 - [`components/configuration/RewardCreateSheet.md`](components/configuration/RewardCreateSheet.md)：采集商品名称、描述、积分和图片的新增商品表单。
 - [`components/configuration/SeasonBasicConfiguration.md`](components/configuration/SeasonBasicConfiguration.md)：当前赛季与历史赛季的卡片式概览。
+- [`components/configuration/PixiSeasonLiquidSurface.md`](components/configuration/PixiSeasonLiquidSurface.md)：使用稳定随机参数和按需 PixiJS 渲染的赛季卡片液体表面。
 - [`components/configuration/SeasonCreateSheet.md`](components/configuration/SeasonCreateSheet.md)：从赛季容器底部升起的新建赛季表单。
 - [`components/configuration/SeasonProjectEnrollmentChart.md`](components/configuration/SeasonProjectEnrollmentChart.md)：预留的赛季各运动项目参与人数横向柱状图，当前未挂载。
 - [`components/configuration/WheelPickerColumn.md`](components/configuration/WheelPickerColumn.md)：日期与项目个数共用的单列滚轮选择器。
@@ -117,8 +121,10 @@ description/
 - [`components/dashboard/SeasonTaskListPanel.md`](components/dashboard/SeasonTaskListPanel.md)：数据看板独立聚焦框中的通用待办列表。
 - [`components/layout/MainWorkspaceShell.md`](components/layout/MainWorkspaceShell.md)：登录后的悬浮式管理工作台外壳。
 - [`components/layout/WorkspaceModuleLayout.md`](components/layout/WorkspaceModuleLayout.md)：平台配置与用户事务共用的左栏模块页面骨架。
-- [`components/user-affairs/UserAffairsPage.md`](components/user-affairs/UserAffairsPage.md)：积分发放、运动记录和兑换记录的用户事务页面骨架。
-- [`components/user-affairs/PointDistributionPanel.md`](components/user-affairs/PointDistributionPanel.md)：按已结束赛季查看用户项目进度、处理积分发放并导出 Excel 的列表面板。
+- [`components/user-affairs/UserAffairsPage.md`](components/user-affairs/UserAffairsPage.md)：赛季结算、运动记录和兑换记录的用户事务页面骨架。
+- [`components/user-affairs/SeasonSettlementPanel.md`](components/user-affairs/SeasonSettlementPanel.md)：查看当前结算赛季、正式参赛用户及积分状态的列表面板。
+- [`components/user-affairs/PixiLiquidReviewButton.md`](components/user-affairs/PixiLiquidReviewButton.md)：使用 PixiJS 绘制悬停液态反馈的待终审记录入口。
+- [`components/user-affairs/SettlementFinalizeDialog.md`](components/user-affairs/SettlementFinalizeDialog.md)：要求输入赛季确认短语的一键结算高风险确认弹窗。
 - [`components/user-affairs/ProofRecordQueryPanel.md`](components/user-affairs/ProofRecordQueryPanel.md)：复用于运动与兑换记录、按 JSON 键动态渲染表格并导出结果的智能查询面板。
 - [`components/visual/FlowingGradientBackground.md`](components/visual/FlowingGradientBackground.md)：全屏 WebGL 流动渐变背景组件。
 - [`components/visual/FloatingSportIcons.md`](components/visual/FloatingSportIcons.md)：运动图标偶发漂移与鼠标排斥组件。
@@ -160,6 +166,7 @@ description/
 - [`api/image/proof-record.md`](api/image/proof-record.md)：通过凭证 ID 安全中转运动凭证图片，并按审核进度分批预取。
 - [`api/suggestion/suggestion-list.md`](api/suggestion/suggestion-list.md)：获取可见用户意见，并渐进加载提交用户头像。
 - [`api/suggestion/suggestion-process.md`](api/suggestion/suggestion-process.md)：将可见用户意见标记为已优化或拒绝，并处理幂等、冲突与提交状态。
+- [`api/settlement/season-settlement.md`](api/settlement/season-settlement.md)：获取当前结算赛季、批量查询正式参赛用户、处理结算终审并幂等发放赛季积分。
 
 ### 数据库文档
 

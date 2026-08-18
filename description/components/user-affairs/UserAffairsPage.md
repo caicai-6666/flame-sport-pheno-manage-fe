@@ -1,28 +1,39 @@
 # UserAffairsPage
 
-`UserAffairsPage` 是管理端“用户事务”模块的页面骨架，通过左侧导航组织积分发放、运动记录和兑换记录。
+`UserAffairsPage` 是管理端“用户事务”模块的页面骨架，通过左侧导航组织赛季结算、运动记录和兑换记录。
 
 > [!NOTE]
-> 当前已完成积分发放、运动记录智能查询和兑换记录智能查询的本地原型，全部模块尚未接入接口。
+> 当前赛季结算已接入真实查询与积分发放接口；运动记录和兑换记录仍为本地智能查询原型。
 
 ---
 
 ## 组件职责
 
-- 提供积分发放、运动记录和兑换记录三个分类入口。
-- 默认选中“积分发放”。
+- 提供赛季结算、运动记录和兑换记录三个分类入口。
+- 默认选中“赛季结算”。
 - 复用 `WorkspaceModuleLayout`，与平台配置保持一致的入场、选中流光和移动端布局。
-- 在“积分发放”内容区挂载 `PointDistributionPanel`，并在切换分类时保留其本地状态。
+- 在“赛季结算”内容区挂载 `SeasonSettlementPanel`，并在切换分类时保留已加载状态。
+- 接收工作台全局用户目录并传给赛季结算面板，使后续终审记录可以按 `season_user_id` 复用用户资料。
+- 接收工作台项目规则目录并传给赛季结算面板，使结算终审与今日待办共享规则模型。
+- 接收赛季结算面板的终审开关事件，并驱动 `WorkspaceModuleLayout` 翻转整个右侧玻璃容器；切换到其他用户事务分类前会先关闭背面。
+- 接收一键结算弹窗开关事件；弹窗存在时禁止切换用户事务分类，避免正在确认或提交的高风险操作被隐藏。
+- “赛季结算”导航使用手动移除白底并保留抗锯齿透明边缘的 `src/assets/用户事务/赛季结算.webp`，并以 `0.82` 比例缩放图像主体；导航槽位尺寸和同组文字对齐保持不变。
+- “运动记录”导航使用移除近白背景、保留半透明抗锯齿边缘并裁去多余画布的 `src/assets/用户事务/运动记录.webp`，以 `0.78` 比例适配通用图标槽。
+- “兑换记录”导航使用相同流程处理的 `src/assets/用户事务/兑换记录.webp`，透明箱体与放大镜图形以 `0.78` 比例适配通用图标槽。
 - 在“运动记录”内容区挂载 `ProofRecordQueryPanel`，根据模拟 JSON 列表动态渲染表格并支持导出。
 - 在“兑换记录”内容区复用 `ProofRecordQueryPanel` 的 `exchange` 模式，不启用照片查看。
 - 为三个分类分别提供独立的单根面板容器，统一管理显隐、过渡与交互隔离。
 
-组件当前不执行真实积分发放、运动凭证审核或兑换状态变更。
+组件中的赛季结算面板可以执行真实积分发放、结算终审与整季一键结算；运动记录和兑换记录面板仍不执行凭证审核或兑换状态变更。
 
 ## 使用方式
 
 ```vue
-<UserAffairsPage :active="activeWorkspaceIndex === 2" />
+<UserAffairsPage
+  :active="activeWorkspaceIndex === 2"
+  :project-rule-catalog="projectRuleCatalog"
+  :user-profile-catalog="userProfileCatalog"
+/>
 ```
 
 ## Props
@@ -30,6 +41,8 @@
 | 名称 | 类型 | 必填 | 默认值 | 说明 |
 | --- | --- | --- | --- | --- |
 | `active` | `Boolean` | 否 | `false` | 用户事务页是否可见；重新进入时驱动左栏入场动画 |
+| `projectRuleCatalog` | `Object` | 是 | 无 | 与数据看板共享的项目等级规则目录 |
+| `userProfileCatalog` | `Object` | 是 | 无 | 工作台生命周期内共享的用户资料及赛季用户关系目录 |
 
 ## 事件、插槽与暴露方法
 
@@ -41,7 +54,7 @@
 
 | 分类 | 计划范围 | 当前状态 |
 | --- | --- | --- |
-| 积分发放 | 赛季积分结算结果与积分发放处理 | 本地列表原型 |
+| 赛季结算 | 当前结算赛季、正式参赛用户与积分发放 | 已接入真实接口 |
 | 运动记录 | 通过自然语言查询运动凭证并导出动态结果 | 本地智能查询原型 |
 | 兑换记录 | 用户商品兑换及后续发放状态 | 本地智能查询原型 |
 
@@ -66,10 +79,12 @@
 ## 依赖与关联代码
 
 - 组件代码：`src/components/user-affairs/UserAffairsPage.vue`
-- 积分发放面板：`src/components/user-affairs/PointDistributionPanel.vue`
+- 赛季结算面板：`src/components/user-affairs/SeasonSettlementPanel.vue`
 - 运动记录智能查询：`src/components/user-affairs/ProofRecordQueryPanel.vue`
 - 通用模块布局：`src/components/layout/WorkspaceModuleLayout.vue`
 - 工作台入口：`src/components/layout/MainWorkspaceShell.vue`
+- 用户资料目录：`src/services/userProfileCatalog.js`
+- 项目规则目录：`src/services/projectRuleCatalog.js`
 - 功能说明：`description/features/user-affairs.md`
 - 积分流水：`description/db/point_record.md`
 - 运动凭证：`description/db/proof_record.md`

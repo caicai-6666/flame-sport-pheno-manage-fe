@@ -90,6 +90,8 @@ fetch(resolveApiRequestPath('seasons'))
 
 `vite.config.js` 在 `APP_ENV=development` 时使用 `/dev/flame/admin/` 作为基础路径。执行开发服务命令时固定监听 `127.0.0.1:8081`；`strictPort` 用于防止端口占用时自动切换到其他端口，避免 Nginx 仍指向旧端口而产生难以定位的访问失败。
 
+开发服务只接受既定反向代理域名的 Host 请求。当前允许 `phenosolar.cloud` 和 `pheno.szkl.com`，新增或迁移开发域名时必须同步维护 `vite.config.js` 中的 `server.allowedHosts`，不应将其放宽为接受任意域名。
+
 启动命令：
 
 ```bash
@@ -120,4 +122,4 @@ npm run build
 sudo nginx -t
 ```
 
-启动前端开发服务后，可访问 `https://phenosolar.cloud/dev/flame/admin/` 检查页面资源和热更新连接。管理后端启动后，再请求 `/dev/flame/admin/api` 下的实际健康检查接口验证路径转换。
+启动前端开发服务后，可访问 `https://phenosolar.cloud/dev/flame/admin/` 或 `https://pheno.szkl.com/dev/flame/admin/` 检查页面资源和热更新连接。管理后端启动后，再请求 `/dev/flame/admin/api` 下的实际健康检查接口验证路径转换。

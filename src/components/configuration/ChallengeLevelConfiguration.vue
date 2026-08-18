@@ -12,25 +12,19 @@ import {
   ProjectLevelRewardUpdateRequestError,
   updateProjectLevelReward,
 } from '../../api/project-level/projectLevelRewardUpdateApi.js'
+import { resolveChallengeLevelTheme } from '../../utils/challengeLevelVisualTheme.js'
 import ChallengeLevelCreateSheet from './ChallengeLevelCreateSheet.vue'
+import PixiChallengeLevelAura from './PixiChallengeLevelAura.vue'
 
 const REWARD_CONFIRMATION_TIMEOUT_MS = 3000
 const MAX_PROJECT_LEVEL_REWARD = 4294967295
 
 const emit = defineEmits(['created'])
 
-const levelPalettePool = [
-  ['#9a6548', '#d39a6f', '#5c3928'],
-  ['#77838d', '#c3cbd0', '#414b53'],
-  ['#b7832c', '#edc766', '#6e4c18'],
-  ['#5c72a4', '#9dbfd2', '#354967'],
-  ['#7159a9', '#b49cdb', '#433268'],
-  ['#3f8c7b', '#80c5aa', '#28584e'],
-]
-
 const challengeLevels = ref([])
 const isLevelListLoading = ref(true)
 const levelListError = ref('')
+const hoveredLevelId = ref(null)
 
 const configurationRef = ref(null)
 const editingLevelId = ref(null)
@@ -51,7 +45,7 @@ let rewardConfirmationTimerId = 0
 function createChallengeLevelView(level) {
   return {
     ...level,
-    palette: levelPalettePool[(level.id - 1) % levelPalettePool.length],
+    theme: resolveChallengeLevelTheme(level),
   }
 }
 
@@ -304,11 +298,17 @@ onBeforeUnmount(() => {
           :class="{ 'is-flipped': editingLevelId === level.id }"
           :data-level-id="level.id"
           :style="{
-            '--level-primary': level.palette[0],
-            '--level-secondary': level.palette[1],
-            '--level-ink': level.palette[2],
+            '--level-base': level.theme.base,
+            '--level-deep': level.theme.deep,
+            '--level-primary': level.theme.primary,
+            '--level-secondary': level.theme.secondary,
+            '--level-accent': level.theme.accent,
+            '--level-ink': level.theme.ink,
+            '--level-text': level.theme.text,
             '--level-enter-delay': `${190 + index * 90}ms`,
           }"
+          @pointerenter="hoveredLevelId = level.id"
+          @pointerleave="hoveredLevelId = null"
         >
           <div class="challenge-level-card__inner">
             <button
@@ -320,7 +320,16 @@ onBeforeUnmount(() => {
               :inert="editingLevelId === level.id"
               @click="openRewardEditor(level)"
             >
+              <PixiChallengeLevelAura
+                :seed="level.id"
+                :primary-color="level.theme.primary"
+                :secondary-color="level.theme.secondary"
+                :accent-color="level.theme.accent"
+                :hovered="hoveredLevelId === level.id && editingLevelId !== level.id"
+                :paused="isCreateSheetOpen || editingLevelId === level.id"
+              />
               <span class="challenge-level-card__face">
+                <span class="challenge-level-card__eyebrow">CHALLENGE LEVEL</span>
                 <span class="challenge-level-card__medal" aria-hidden="true">
                   <svg viewBox="0 0 24 24">
                     <path d="m8.3 3 3.7 5 3.7-5M12 8a6 6 0 1 1 0 12 6 6 0 0 1 0-12z" />
@@ -679,10 +688,23 @@ onBeforeUnmount(() => {
 }
 
 .challenge-level-card__front {
+  isolation: isolate;
   width: 100%;
   padding: 0;
+  color: var(--level-text);
   text-align: left;
   appearance: none;
+  background:
+    radial-gradient(
+      circle at 50% 43%,
+      color-mix(in srgb, var(--level-primary) 24%, transparent),
+      transparent 48%
+    ),
+    linear-gradient(145deg, var(--level-base), var(--level-deep));
+  border-color: color-mix(in srgb, var(--level-secondary) 34%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--level-secondary) 22%, transparent),
+    0 17px 36px color-mix(in srgb, var(--level-base) 24%, transparent);
   cursor: pointer;
   flex-direction: column;
 }
@@ -696,15 +718,13 @@ onBeforeUnmount(() => {
 
 .challenge-level-card__face {
   position: relative;
-  isolation: isolate;
+  z-index: 1;
   display: flex;
   min-height: 178px;
-  padding: 24px;
+  padding: 18px 24px 20px;
   overflow: hidden;
-  color: #fff;
-  background:
-    radial-gradient(circle at 16% 4%, rgb(255 255 255 / 35%), transparent 31%),
-    linear-gradient(138deg, var(--level-primary), var(--level-secondary));
+  color: var(--level-text);
+  background: transparent;
   align-items: center;
   flex-direction: column;
   justify-content: center;
@@ -712,34 +732,43 @@ onBeforeUnmount(() => {
 
 .challenge-level-card__face::before {
   position: absolute;
-  z-index: -1;
-  inset: 0;
-  background:
-    linear-gradient(115deg, transparent 28%, rgb(255 255 255 / 17%) 49%, transparent 68%),
-    linear-gradient(to bottom, transparent 56%, rgb(31 31 28 / 13%));
-  background-position: 145% 0, 0 0;
-  background-size: 220% 100%, 100% 100%;
+  inset: 12px;
+  border: 1px solid color-mix(in srgb, var(--level-secondary) 18%, transparent);
+  border-radius: 20px 28px 21px 30px;
   content: '';
   pointer-events: none;
-  transition: background-position 760ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition:
+    border-color 420ms ease,
+    border-radius 640ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 640ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.challenge-level-card__eyebrow {
+  margin-bottom: 8px;
+  color: color-mix(in srgb, var(--level-secondary) 82%, var(--level-text));
+  font-size: 9px;
+  font-weight: 760;
+  letter-spacing: 0.2em;
 }
 
 .challenge-level-card__medal {
   display: grid;
-  width: 68px;
-  height: 68px;
-  margin-bottom: 14px;
-  color: rgb(255 255 255 / 92%);
-  background: rgb(255 255 255 / 14%);
-  border: 1px solid rgb(255 255 255 / 32%);
-  border-radius: 22px;
+  width: 62px;
+  height: 62px;
+  margin-bottom: 10px;
+  color: var(--level-text);
+  background:
+    radial-gradient(circle at 34% 26%, var(--level-secondary), var(--level-primary) 48%, var(--level-accent));
+  border: 1px solid color-mix(in srgb, var(--level-secondary) 62%, transparent);
+  border-radius: 48% 52% 45% 55% / 54% 43% 57% 46%;
   box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 32%),
-    0 12px 25px rgb(39 33 27 / 13%);
+    inset 0 1px 0 color-mix(in srgb, var(--level-text) 28%, transparent),
+    inset 0 -8px 16px color-mix(in srgb, var(--level-base) 22%, transparent),
+    0 13px 28px color-mix(in srgb, var(--level-base) 34%, transparent);
   place-items: center;
-  transition: transform 520ms cubic-bezier(0.16, 1, 0.3, 1);
-  -webkit-backdrop-filter: blur(8px);
-  backdrop-filter: blur(8px);
+  transition:
+    border-radius 620ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 520ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .challenge-level-card__medal svg {
@@ -754,20 +783,27 @@ onBeforeUnmount(() => {
 
 .challenge-level-card__face > strong {
   margin: 0;
-  font-size: clamp(24px, 2.1vw, 31px);
+  color: var(--level-text);
+  font-size: clamp(23px, 2vw, 30px);
   font-weight: 800;
-  letter-spacing: 0.12em;
-  text-shadow: 0 4px 14px rgb(39 31 24 / 22%);
+  letter-spacing: 0.1em;
+  text-shadow: 0 4px 15px color-mix(in srgb, var(--level-base) 48%, transparent);
 }
 
 .challenge-level-card__reward {
+  position: relative;
+  z-index: 1;
   display: flex;
   min-height: 70px;
-  padding: 13px 19px;
-  color: #58635d;
+  padding: 13px 20px;
+  color: color-mix(in srgb, var(--level-text) 72%, var(--level-secondary));
   background:
-    linear-gradient(120deg, rgb(255 255 255 / 74%), rgb(247 249 247 / 64%)),
-    color-mix(in srgb, var(--level-secondary) 7%, white);
+    linear-gradient(
+      115deg,
+      color-mix(in srgb, var(--level-base) 80%, transparent),
+      color-mix(in srgb, var(--level-deep) 68%, transparent)
+    );
+  border-top: 1px solid color-mix(in srgb, var(--level-secondary) 24%, transparent);
   align-items: center;
   justify-content: space-between;
 }
@@ -778,12 +814,12 @@ onBeforeUnmount(() => {
 }
 
 .challenge-level-card__reward > strong {
-  color: var(--level-ink);
+  color: var(--level-secondary);
   font-size: clamp(25px, 2.2vw, 32px);
   font-weight: 820;
   letter-spacing: -0.04em;
   line-height: 1;
-  text-shadow: 0 3px 10px color-mix(in srgb, var(--level-primary) 18%, transparent);
+  text-shadow: 0 3px 12px color-mix(in srgb, var(--level-base) 54%, transparent);
 }
 
 .challenge-level-card__reward small {
@@ -1113,18 +1149,21 @@ onBeforeUnmount(() => {
   }
 
   .challenge-level-card:hover .challenge-level-card__side {
-    border-color: color-mix(in srgb, var(--level-primary) 34%, white);
+    border-color: color-mix(in srgb, var(--level-secondary) 52%, transparent);
     box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 96%),
+      inset 0 1px 0 color-mix(in srgb, var(--level-secondary) 30%, transparent),
       0 24px 46px color-mix(in srgb, var(--level-primary) 21%, transparent);
   }
 
   .challenge-level-card:not(.is-flipped):hover .challenge-level-card__face::before {
-    background-position: -65% 0, 0 0;
+    border-color: color-mix(in srgb, var(--level-secondary) 34%, transparent);
+    border-radius: 29px 19px 31px 21px;
+    transform: rotate(-0.8deg) scale(1.012);
   }
 
   .challenge-level-card:not(.is-flipped):hover .challenge-level-card__medal {
-    transform: translateY(-2px) rotate(-3deg) scale(1.045);
+    border-radius: 42% 58% 54% 46% / 47% 55% 45% 53%;
+    transform: translateY(-3px) rotate(-4deg) scale(1.055);
   }
 
   .challenge-level-card__actions button:hover {

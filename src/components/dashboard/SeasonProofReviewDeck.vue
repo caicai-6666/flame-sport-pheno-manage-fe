@@ -4,6 +4,7 @@ import {
   FinalReviewRequestError,
   submitProofFinalReview,
 } from '../../api/proof/finalReviewApi.js'
+import { createControlledWheelScroller } from '../../utils/controlledWheelScroller.js'
 
 const DEFAULT_REVIEW_COMMENTS = {
   approved: '凭证符合项目要求，终审通过。',
@@ -13,7 +14,6 @@ const DECISION_CONFIRMATION_TIMEOUT_MS = 3000
 const MIN_IMAGE_ZOOM = 1
 const MAX_IMAGE_ZOOM = 3
 const IMAGE_ZOOM_STEP = 0.25
-const MAX_WHEEL_SCROLL_PER_FRAME = 120
 
 const props = defineProps({
   records: {
@@ -31,6 +31,22 @@ const props = defineProps({
   projectRuleStates: {
     type: Object,
     default: () => ({}),
+  },
+  emptyTitle: {
+    type: String,
+    default: '今日记录已审核完成',
+  },
+  emptyCloseLabel: {
+    type: String,
+    default: '返回数据看板',
+  },
+  submitReview: {
+    type: Function,
+    default: submitProofFinalReview,
+  },
+  fillDefaultReviewComment: {
+    type: Boolean,
+    default: true,
   },
 })
 
@@ -83,8 +99,11 @@ const currentReviewComment = computed({
 let decisionTimerId = 0
 let confirmationTimerId = 0
 let finalReviewRequestController = null
-const listWheelScrollState = { frameId: 0, viewport: null, deltaX: 0, deltaY: 0 }
-const imageWheelScrollState = { frameId: 0, viewport: null, deltaX: 0, deltaY: 0 }
+const listWheelScroller = createControlledWheelScroller({ maxDeltaPerFrame: 120 })
+const imageWheelScroller = createControlledWheelScroller({
+  maxDeltaPerFrame: 120,
+  allowHorizontal: true,
+})
 
 function formatProjectRuleValue(value) {
   if (value === null) return '待设置'
@@ -216,71 +235,12 @@ async function resetImageZoom() {
   }
 }
 
-function normalizeWheelDelta(value, deltaMode, viewportSize) {
-  if (deltaMode === 1) return value * 16
-  if (deltaMode === 2) return value * viewportSize
-  return value
-}
-
-function queueControlledWheelScroll(event, state, allowHorizontal = false) {
-  if (event.ctrlKey || event.metaKey) {
-    // 触控板双指捏合通常表现为 Ctrl/Command + wheel，审核区内不允许页面或图片缩放。
-    event.preventDefault()
-    return
-  }
-
-  const viewport = event.currentTarget
-  let deltaX = normalizeWheelDelta(event.deltaX, event.deltaMode, viewport.clientWidth)
-  let deltaY = normalizeWheelDelta(event.deltaY, event.deltaMode, viewport.clientHeight)
-  if (allowHorizontal && event.shiftKey && deltaX === 0) {
-    deltaX = deltaY
-    deltaY = 0
-  }
-  if (!allowHorizontal) deltaX = 0
-  if (!deltaX && !deltaY) return
-
-  event.preventDefault()
-  state.viewport = viewport
-  // 大幅触控板手势按帧截断，避免 Safari 一次跳入尚未栅格化的远端区域。
-  state.deltaX = Math.max(
-    -MAX_WHEEL_SCROLL_PER_FRAME,
-    Math.min(MAX_WHEEL_SCROLL_PER_FRAME, state.deltaX + deltaX),
-  )
-  state.deltaY = Math.max(
-    -MAX_WHEEL_SCROLL_PER_FRAME,
-    Math.min(MAX_WHEEL_SCROLL_PER_FRAME, state.deltaY + deltaY),
-  )
-  if (state.frameId) return
-
-  state.frameId = window.requestAnimationFrame(() => {
-    const target = state.viewport
-    const nextDeltaX = state.deltaX
-    const nextDeltaY = state.deltaY
-    state.frameId = 0
-    state.viewport = null
-    state.deltaX = 0
-    state.deltaY = 0
-    if (!target?.isConnected) return
-
-    target.scrollLeft += nextDeltaX
-    target.scrollTop += nextDeltaY
-  })
-}
-
 function handleProofListWheel(event) {
-  queueControlledWheelScroll(event, listWheelScrollState)
+  listWheelScroller.handleWheel(event)
 }
 
 function handleImageWheel(event) {
-  queueControlledWheelScroll(event, imageWheelScrollState, true)
-}
-
-function cancelControlledWheelScroll(state) {
-  if (state.frameId) window.cancelAnimationFrame(state.frameId)
-  state.frameId = 0
-  state.viewport = null
-  state.deltaX = 0
-  state.deltaY = 0
+  imageWheelScroller.handleWheel(event)
 }
 
 function resetRecordImageView() {
@@ -295,15 +255,21 @@ function openRecord(record) {
   resetRecordImageView()
   selectedRecordId.value = record.id
   reviewValidationMessage.value = ''
-  emit('request-rule', {
-    projectId: record.projectId,
-    levelId: record.levelId,
-  })
+  if (Number.isInteger(record.levelId) && record.levelId > 0) {
+    emit('request-rule', {
+      projectId: record.projectId,
+      levelId: record.levelId,
+    })
+  }
   emit('request-image', { proofRecordId: record.id })
 }
 
 function requestCurrentRule() {
-  if (!currentRecord.value) return
+  if (
+    !currentRecord.value
+    || !Number.isInteger(currentRecord.value.levelId)
+    || currentRecord.value.levelId <= 0
+  ) return
 
   emit('request-rule', {
     projectId: currentRecord.value.projectId,
@@ -347,9 +313,10 @@ async function submitDecision(nextDecision) {
 
   clearDecisionConfirmation()
   const reviewedRecordId = currentRecord.value.id
-  const reviewComment = currentReviewComment.value.trim()
-    || DEFAULT_REVIEW_COMMENTS[nextDecision]
-  reviewComments.value[reviewedRecordId] = reviewComment
+  const normalizedReviewComment = currentReviewComment.value.trim()
+  const reviewComment = normalizedReviewComment
+    || (props.fillDefaultReviewComment ? DEFAULT_REVIEW_COMMENTS[nextDecision] : null)
+  reviewComments.value[reviewedRecordId] = reviewComment ?? ''
   reviewValidationMessage.value = ''
   isSubmittingReview.value = true
   submittingDecision.value = nextDecision
@@ -357,7 +324,7 @@ async function submitDecision(nextDecision) {
   finalReviewRequestController = requestController
 
   try {
-    const finalReview = await submitProofFinalReview({
+    const finalReview = await props.submitReview({
       proofRecordId: reviewedRecordId,
       reviewComment,
       decision: nextDecision,
@@ -419,8 +386,8 @@ onBeforeUnmount(() => {
   finalReviewRequestController?.abort()
   window.clearTimeout(confirmationTimerId)
   window.clearTimeout(decisionTimerId)
-  cancelControlledWheelScroll(listWheelScrollState)
-  cancelControlledWheelScroll(imageWheelScrollState)
+  listWheelScroller.cancel()
+  imageWheelScroller.cancel()
 })
 </script>
 
@@ -785,7 +752,9 @@ onBeforeUnmount(() => {
               <span>
                 <b>管理员评语</b>
                 <small id="review-comment-help" aria-live="polite">
-                  {{ reviewValidationMessage || '选填 · 留空使用默认评语' }}
+                  {{ reviewValidationMessage || (props.fillDefaultReviewComment
+                    ? '选填 · 留空使用默认评语'
+                    : '选填 · 留空不填写评语') }}
                 </small>
               </span>
               <textarea
@@ -863,8 +832,8 @@ onBeforeUnmount(() => {
           <path d="m6 12 4 4 8-9" />
         </svg>
       </span>
-      <strong>今日记录已审核完成</strong>
-      <button type="button" @click="handleBack">返回数据看板</button>
+      <strong>{{ props.emptyTitle }}</strong>
+      <button type="button" @click="handleBack">{{ props.emptyCloseLabel }}</button>
     </div>
     </template>
   </section>

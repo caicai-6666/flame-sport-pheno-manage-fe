@@ -53,6 +53,12 @@ function createResponseError(status) {
   return new FinalReviewRequestError('终审结果暂时无法提交，请稍后重试', status)
 }
 
+function createSettlementResponseError(status, payload) {
+  const detail = typeof payload?.detail === 'string' ? payload.detail.trim() : ''
+  if (detail) return new FinalReviewRequestError(detail, status)
+  return createResponseError(status)
+}
+
 function normalizeFinalReviewResponse(payload, proofRecordId, decision) {
   if (
     payload?.proof_record_id !== proofRecordId ||
@@ -76,12 +82,11 @@ function normalizeFinalReviewResponse(payload, proofRecordId, decision) {
   }
 }
 
-// 终审属于有副作用操作，不自动重试，避免网络结果不明确时重复提交同一凭证。
-export async function submitProofFinalReview({
+async function submitFinalReview(endpoint, {
   proofRecordId,
   reviewComment,
   decision,
-}, { signal } = {}) {
+}, { signal, settlementScope = false } = {}) {
   if (!Number.isInteger(proofRecordId) || proofRecordId <= 0) {
     throw new FinalReviewRequestError('待终审凭证编号无效', 422)
   }
@@ -89,7 +94,7 @@ export async function submitProofFinalReview({
     throw new FinalReviewRequestError('终审决定无效', 422)
   }
 
-  const response = await adminFetch('proof/final-review', {
+  const response = await adminFetch(endpoint, {
     method: 'POST',
     headers: {
       Accept: 'application/json',
@@ -104,6 +109,23 @@ export async function submitProofFinalReview({
   })
   const payload = await readJsonResponse(response)
 
-  if (!response.ok) throw createResponseError(response.status)
+  if (!response.ok) {
+    throw settlementScope
+      ? createSettlementResponseError(response.status, payload)
+      : createResponseError(response.status)
+  }
   return normalizeFinalReviewResponse(payload, proofRecordId, decision)
+}
+
+// 终审属于有副作用操作，不自动重试，避免网络结果不明确时重复提交同一凭证。
+export function submitProofFinalReview(review, options = {}) {
+  return submitFinalReview('proof/final-review', review, options)
+}
+
+// 结算入口使用专用路径，由后端额外校验凭证属于当前结算赛季的正式参赛用户。
+export function submitSettlementFinalReview(review, options = {}) {
+  return submitFinalReview('settlement/final-review', review, {
+    ...options,
+    settlementScope: true,
+  })
 }

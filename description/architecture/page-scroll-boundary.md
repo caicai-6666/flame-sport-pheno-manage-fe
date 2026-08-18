@@ -20,6 +20,7 @@
 当前以下区域可以根据内容独立滚动：
 
 - 工作台每个主模块的内容页。
+- 当前结算赛季用户列表。
 - 赛季基本信息卡片网格。
 - 新建赛季表单正文与日期滚轮。
 - 运动凭证长图展示框。
@@ -34,6 +35,7 @@
 
 - 固定高度布局中的滚动容器及其父级应设置 `min-height: 0`，避免内容撑开外层。
 - 只在确实可能超出可用空间的业务容器上使用 `overflow: auto`。
+- 大型卡片列表可以通过共享受控滚动工具按动画帧截断异常大的滚轮输入；该限制只控制单帧位移，不得裁剪可访问的内容范围。
 - 弹窗、下拉菜单等浮层应使用覆盖层处理，不依赖页面滚动暴露内容。
 - 小屏布局需要更多空间时，应滚动工作台内部内容区，不得滚动根页面。
 
@@ -45,3 +47,4 @@
 - 凭证长图滚动：`src/components/dashboard/SeasonProofReviewDeck.vue`
 - 待办列表滚动：`src/components/dashboard/SeasonTaskListPanel.vue`
 - 报名名单滚动：`src/components/dashboard/EnrollmentFlipCard.vue`
+- 受控滚轮工具：`src/utils/controlledWheelScroller.js`

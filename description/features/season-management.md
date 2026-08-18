@@ -34,7 +34,9 @@
 > [!IMPORTANT]
 > 前端滚轮用于即时减少无效输入，服务端仍会重新校验赛季重叠、完整日历月和创建瞬间的可见项目数量。冲突或校验失败时保留表单并展示安全提示。
 
-卡片使用运动赛事通行证式封面，整张卡片通过干净的双色主题建立信息层级，不保留参与人数底栏。已结束赛季的正面使用灰阶和较低透明度弱化；进行中赛季以更高饱和度、轻微上浮、双层描边、高对比状态胶囊、动态光带和边缘呼吸效果成为列表中的主要视觉焦点。结算中只保留静态暖色提示，避免与进行中状态混淆。
+卡片使用运动赛事通行证式封面，不保留参与人数底栏。普通赛季使用深玉、雾蓝、松石和灰紫色板，并分别配置两种深色底色及三种液体强调色；进行中赛季使用独立的深紫到海蓝底色，以及亮紫、莓粉和清透蓝流体，不参与普通色板分配。已有赛季卡片由 PixiJS 绘制三条彩色流带及七组液滴，再使用两层反向运动的 `DisplacementFilter` 产生水平、垂直折射和局部涡旋；不绘制白色亮斑，不再使用可能产生白边的 Alpha 阈值过滤。每个赛季通过 ID 确定性生成不同的流向、速度、相位、液滴尺寸和轨迹。进行中赛季常驻更高流速、轨道幅度、色彩浓度与位移强度，悬停后继续叠加增强；其他状态保持克制。新建入口保持静态。
+
+已结束赛季的正面使用灰阶和较低透明度弱化；进行中赛季以更高饱和度、轻微上浮、双层描边、高对比状态胶囊、动态光带和边缘呼吸效果成为列表中的主要视觉焦点。结算中只保留静态暖色提示，避免与进行中状态混淆。液体渲染器只在卡片接近可视区域时存在，页面切走或系统要求减少动态效果时暂停持续渲染。
 
 全部已有赛季当前仅作为只读概览卡片展示，不响应点击，也不提供翻面或居中详情层。只有网格首位的“新建赛季”卡片保留点击交互。
 
@@ -60,6 +62,7 @@
 - 赛季概览组件：`src/components/configuration/SeasonBasicConfiguration.vue`
 - 平台配置页面：`src/components/configuration/PlatformConfigurationPage.vue`
 - 组件说明：`description/components/configuration/SeasonBasicConfiguration.md`
+- 液体卡片表面：`description/components/configuration/PixiSeasonLiquidSurface.md`
 - 新建表单：`description/components/configuration/SeasonCreateSheet.md`
 - 赛季列表接口：`description/api/season/season-list.md`
 - 赛季创建接口：`description/api/season/season-create.md`

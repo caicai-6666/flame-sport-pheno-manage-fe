@@ -8,6 +8,7 @@ import {
   getAllSeasons,
   SeasonListRequestError,
 } from '../../api/season/seasonListApi.js'
+import PixiSeasonLiquidSurface from './PixiSeasonLiquidSurface.vue'
 import SeasonCreateSheet from './SeasonCreateSheet.vue'
 
 const props = defineProps({
@@ -25,10 +26,12 @@ const props = defineProps({
 const emit = defineEmits(['create'])
 
 const localSeasonPalettes = [
-  ['#7162d7', '#41b79a', '#443876'],
-  ['#3e8fbd', '#63c1b5', '#285b70'],
-  ['#b56d87', '#d99a68', '#713f51'],
+  ['#173b40', '#2a4858', '#32957d', '#4e78b4', '#b76f91'],
+  ['#22374c', '#344e56', '#438caf', '#6d72b4', '#bd7969'],
+  ['#303448', '#414b55', '#6c82bd', '#41917d', '#a9688f'],
+  ['#293d39', '#3e4a56', '#529873', '#507fad', '#9d6c98'],
 ]
+const activeSeasonPalette = ['#402b78', '#265b91', '#835bea', '#de5a9d', '#3e9cde']
 
 const seasonStatusPresentation = {
   0: { statusTone: 'upcoming' },
@@ -40,6 +43,7 @@ const seasonStatusPresentation = {
 const seasons = ref([])
 const isSeasonListLoading = ref(true)
 const seasonListError = ref('')
+const hoveredCardId = ref(null)
 let seasonListRequestController
 let seasonCreateRequestController
 
@@ -57,7 +61,10 @@ function createSeasonView(season) {
   return {
     ...season,
     ...presentation,
-    palette: localSeasonPalettes[season.id % localSeasonPalettes.length],
+    // 进行中赛季固定使用紫、粉、蓝活力色板，其他状态继续按主键稳定分配低饱和主题。
+    palette: season.status === 1
+      ? activeSeasonPalette
+      : localSeasonPalettes[season.id % localSeasonPalettes.length],
   }
 }
 
@@ -245,10 +252,23 @@ onBeforeUnmount(() => {
             '--season-card-delay': `${(index + 1) * 70}ms`,
             '--season-primary': season.palette[0],
             '--season-secondary': season.palette[1],
+            '--season-liquid-primary': season.palette[2],
+            '--season-liquid-secondary': season.palette[3],
+            '--season-liquid-accent': season.palette[4],
           }"
+          @pointerenter="hoveredCardId = season.id"
+          @pointerleave="hoveredCardId = null"
         >
           <div class="season-card__front">
             <div class="season-card__cover">
+              <PixiSeasonLiquidSurface
+                :seed="season.id"
+                :primary-color="season.palette[2]"
+                :secondary-color="season.palette[3]"
+                :accent-color="season.palette[4]"
+                :featured="season.statusTone === 'active'"
+                :hovered="hoveredCardId === season.id"
+              />
               <div class="season-card__topline">
                 <span class="season-card__status">
                   <i aria-hidden="true"></i>
@@ -541,8 +561,22 @@ onBeforeUnmount(() => {
   overflow: hidden;
   color: #fff;
   background:
-    radial-gradient(circle at 12% 2%, rgb(255 255 255 / 26%), transparent 30%),
-    linear-gradient(135deg, var(--season-primary), var(--season-secondary));
+    radial-gradient(
+      circle at 12% 2%,
+      color-mix(in srgb, var(--season-liquid-primary) 34%, transparent),
+      transparent 38%
+    ),
+    radial-gradient(
+      circle at 92% 88%,
+      color-mix(in srgb, var(--season-liquid-accent) 30%, transparent),
+      transparent 44%
+    ),
+    radial-gradient(
+      circle at 72% 12%,
+      color-mix(in srgb, var(--season-liquid-secondary) 24%, transparent),
+      transparent 35%
+    ),
+    linear-gradient(138deg, var(--season-primary), var(--season-secondary));
   flex-direction: column;
 }
 
@@ -551,7 +585,12 @@ onBeforeUnmount(() => {
   z-index: -1;
   inset: 0;
   background:
-    linear-gradient(118deg, transparent 32%, rgb(255 255 255 / 12%) 49%, transparent 65%),
+    linear-gradient(
+      118deg,
+      transparent 30%,
+      color-mix(in srgb, var(--season-liquid-accent) 24%, transparent) 49%,
+      transparent 67%
+    ),
     linear-gradient(to bottom, transparent 55%, rgb(22 27 24 / 15%));
   background-position: 135% 50%, 0 0;
   background-size: 220% 100%, 100% 100%;
@@ -570,12 +609,25 @@ onBeforeUnmount(() => {
 
 .season-card.is-active .season-card__cover {
   background:
-    radial-gradient(circle at 13% 2%, rgb(255 255 255 / 42%), transparent 32%),
-    radial-gradient(circle at 88% 92%, rgb(116 255 211 / 25%), transparent 42%),
+    radial-gradient(
+      circle at 13% 2%,
+      color-mix(in srgb, var(--season-liquid-primary) 32%, transparent),
+      transparent 36%
+    ),
+    radial-gradient(
+      circle at 88% 92%,
+      color-mix(in srgb, var(--season-liquid-accent) 29%, transparent),
+      transparent 45%
+    ),
+    radial-gradient(
+      circle at 72% 14%,
+      color-mix(in srgb, var(--season-liquid-secondary) 27%, transparent),
+      transparent 38%
+    ),
     linear-gradient(
       128deg,
-      color-mix(in srgb, var(--season-primary) 88%, #453e91),
-      color-mix(in srgb, var(--season-secondary) 90%, #25b78c)
+      color-mix(in srgb, var(--season-primary) 88%, #223d42),
+      color-mix(in srgb, var(--season-secondary) 90%, #335f59)
     );
 }
 
@@ -586,9 +638,14 @@ onBeforeUnmount(() => {
   bottom: 18px;
   left: 0;
   width: 4px;
-  background: linear-gradient(to bottom, #fff, #a9ffe5 55%, transparent);
+  background: linear-gradient(
+    to bottom,
+    var(--season-liquid-accent),
+    var(--season-liquid-primary) 55%,
+    transparent
+  );
   border-radius: 0 999px 999px 0;
-  box-shadow: 0 0 18px rgb(148 255 222 / 76%);
+  box-shadow: 0 0 18px color-mix(in srgb, var(--season-liquid-primary) 66%, transparent);
   content: '';
   opacity: 0.9;
   pointer-events: none;

@@ -18,6 +18,7 @@ import {
   updateProjectRule,
 } from '../../api/project/projectRuleUpdateApi.js'
 import { createProjectRuleCatalog } from '../../services/projectRuleCatalog.js'
+import PixiProjectGalaxy from './PixiProjectGalaxy.vue'
 import SportProjectCreateSheet from './SportProjectCreateSheet.vue'
 
 const props = defineProps({
@@ -311,6 +312,7 @@ const localSportProjectPrototypes = [
 ]
 
 const sportProjects = ref([])
+const hoveredProjectId = ref(null)
 
 const configurationRef = ref(null)
 const detailBackButtonRef = ref(null)
@@ -577,6 +579,7 @@ async function openProjectDetail(project, event) {
   ) return
 
   clearDetailTimers()
+  hoveredProjectId.value = null
   projectStatusUpdateMessage.value = ''
   resetRuleEditor()
 
@@ -621,6 +624,15 @@ async function openProjectDetail(project, event) {
       focusTimerId = window.setTimeout(() => detailBackButtonRef.value?.focus(), 760)
     })
   })
+}
+
+function setHoveredProject(projectId) {
+  if (selectedProject.value || isCreateSheetOpen.value || isCreateSheetPreparing.value) return
+  hoveredProjectId.value = projectId
+}
+
+function clearHoveredProject(projectId) {
+  if (hoveredProjectId.value === projectId) hoveredProjectId.value = null
 }
 
 function clearRuleUpdateConfirmation() {
@@ -990,8 +1002,20 @@ onBeforeUnmount(() => {
           }"
           :aria-label="`查看${project.name}各挑战等级要求`"
           :aria-expanded="selectedProject?.id === project.id"
+          @mouseenter="setHoveredProject(project.id)"
+          @mouseleave="clearHoveredProject(project.id)"
+          @focus="setHoveredProject(project.id)"
+          @blur="clearHoveredProject(project.id)"
           @click="openProjectDetail(project, $event)"
         >
+          <PixiProjectGalaxy
+            :seed="project.id"
+            :primary-color="project.palette[0]"
+            :secondary-color="project.palette[1]"
+            :accent-color="project.palette[2]"
+            :hovered="hoveredProjectId === project.id"
+            :paused="selectedProject !== null || isCreateSheetOpen || isCreateSheetPreparing"
+          />
           <span class="sport-project-card__icon" aria-hidden="true">
             <img v-if="project.iconDataUrl" :src="project.iconDataUrl" alt="" />
             <svg v-else-if="project.iconPaths.length" viewBox="0 0 48 48">
@@ -1044,6 +1068,13 @@ onBeforeUnmount(() => {
             :aria-hidden="detailFlipped"
             :inert="detailFlipped"
           >
+            <PixiProjectGalaxy
+              :seed="selectedProject.id"
+              :primary-color="selectedProject.palette[0]"
+              :secondary-color="selectedProject.palette[1]"
+              :accent-color="selectedProject.palette[2]"
+              :paused="detailFlipped"
+            />
             <span class="sport-project-card__icon" aria-hidden="true">
               <img v-if="selectedProject.iconDataUrl" :src="selectedProject.iconDataUrl" alt="" />
               <svg v-else-if="selectedProject.iconPaths.length" viewBox="0 0 48 48">
@@ -1542,13 +1573,15 @@ onBeforeUnmount(() => {
   text-align: left;
   appearance: none;
   background:
-    radial-gradient(circle at 84% 8%, rgb(255 255 255 / 25%), transparent 29%),
-    linear-gradient(145deg, var(--project-primary), var(--project-secondary));
-  border: 1px solid rgb(255 255 255 / 42%);
+    radial-gradient(circle at 84% 8%, color-mix(in srgb, var(--project-primary) 20%, transparent), transparent 33%),
+    linear-gradient(145deg, color-mix(in srgb, var(--project-ink) 34%, #09172e), #070e1d 72%);
+  border: 1px solid color-mix(in srgb, var(--project-secondary) 34%, transparent);
   border-radius: 25px;
   box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 35%),
-    0 15px 32px color-mix(in srgb, var(--project-primary) 19%, transparent);
+    inset 0 1px 0 rgb(218 233 255 / 12%),
+    0 12px 24px rgb(3 8 22 / 24%),
+    0 22px 46px color-mix(in srgb, var(--project-primary) 24%, transparent),
+    0 0 24px color-mix(in srgb, var(--project-secondary) 10%, transparent);
   cursor: pointer;
   flex-direction: column;
   opacity: 0;
@@ -1569,29 +1602,32 @@ onBeforeUnmount(() => {
 
 .sport-project-card::before {
   position: absolute;
-  z-index: -1;
+  z-index: 1;
   inset: 0;
   background:
-    linear-gradient(122deg, transparent 22%, rgb(255 255 255 / 14%) 47%, transparent 68%),
-    linear-gradient(to top, rgb(18 35 29 / 20%), transparent 62%);
-  background-position: 140% 50%, 0 0;
-  background-size: 210% 100%, 100% 100%;
+    linear-gradient(to top, rgb(3 8 19 / 65%), transparent 72%),
+    radial-gradient(circle at 92% 12%, color-mix(in srgb, var(--project-secondary) 12%, transparent), transparent 42%);
   content: '';
   pointer-events: none;
-  transition: background-position 720ms cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity 520ms ease;
 }
 
 .sport-project-card__icon {
+  position: relative;
+  z-index: 2;
   display: grid;
   width: 66px;
   height: 66px;
   color: rgb(255 255 255 / 94%);
-  background: rgb(255 255 255 / 14%);
-  border: 1px solid rgb(255 255 255 / 20%);
+  background:
+    linear-gradient(145deg, rgb(211 229 255 / 23%), rgb(93 74 176 / 16%)),
+    rgb(7 15 31 / 54%);
+  border: 1px solid color-mix(in srgb, var(--project-secondary) 52%, rgb(207 228 255 / 36%));
   border-radius: 21px;
   box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 18%),
-    0 10px 24px rgb(26 46 38 / 12%);
+    inset 0 1px 0 rgb(232 242 255 / 25%),
+    0 0 22px color-mix(in srgb, var(--project-secondary) 18%, transparent),
+    0 10px 24px rgb(3 8 21 / 24%);
   place-items: center;
   -webkit-backdrop-filter: blur(10px);
   backdrop-filter: blur(10px);
@@ -1617,10 +1653,22 @@ onBeforeUnmount(() => {
   width: 46px;
   height: 46px;
   object-fit: contain;
-  filter: drop-shadow(0 7px 9px rgb(22 43 34 / 16%));
+  /* 服务端图标以透明黑色为主，统一转为带冷色调的亮色轮廓以适配星河深底。 */
+  filter:
+    brightness(0)
+    saturate(100%)
+    invert(91%)
+    sepia(12%)
+    saturate(935%)
+    hue-rotate(184deg)
+    brightness(108%)
+    contrast(104%)
+    drop-shadow(0 7px 9px rgb(3 8 22 / 42%));
 }
 
 .sport-project-card__copy {
+  position: relative;
+  z-index: 2;
   display: grid;
   margin-top: 18px;
   gap: 6px;
@@ -1635,7 +1683,7 @@ onBeforeUnmount(() => {
 }
 
 .sport-project-card__copy small {
-  color: rgb(255 255 255 / 76%);
+  color: rgb(224 235 255 / 78%);
   font-size: 12px;
   font-weight: 630;
   line-height: 1.45;
@@ -1643,12 +1691,14 @@ onBeforeUnmount(() => {
 }
 
 .sport-project-card__meta {
+  position: relative;
+  z-index: 2;
   display: flex;
   margin-top: auto;
   padding-top: 17px;
   align-items: center;
   justify-content: space-between;
-  color: rgb(255 255 255 / 88%);
+  color: rgb(228 238 255 / 90%);
   font-size: 12px;
   font-weight: 720;
 }
@@ -1668,11 +1718,11 @@ onBeforeUnmount(() => {
   margin-left: auto;
   margin-right: 9px;
   padding: 4px 8px;
-  color: rgb(255 255 255 / 86%);
+  color: rgb(230 238 255 / 88%);
   font-size: 9px;
   font-weight: 720;
-  background: rgb(24 37 31 / 17%);
-  border: 1px solid rgb(255 255 255 / 16%);
+  background: rgb(6 12 27 / 44%);
+  border: 1px solid rgb(210 226 255 / 17%);
   border-radius: 999px;
   -webkit-backdrop-filter: blur(7px);
   backdrop-filter: blur(7px);
@@ -1749,13 +1799,23 @@ onBeforeUnmount(() => {
 }
 
 .sport-project-detail-card__front {
+  isolation: isolate;
   display: flex;
   padding: clamp(28px, 4vw, 48px);
   color: #fff;
   background:
-    radial-gradient(circle at 84% 8%, rgb(255 255 255 / 25%), transparent 29%),
-    linear-gradient(145deg, var(--project-primary), var(--project-secondary));
+    radial-gradient(circle at 84% 8%, color-mix(in srgb, var(--project-primary) 20%, transparent), transparent 33%),
+    linear-gradient(145deg, color-mix(in srgb, var(--project-ink) 34%, #09172e), #070e1d 72%);
   flex-direction: column;
+}
+
+.sport-project-detail-card__front::after {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  background: linear-gradient(to top, rgb(3 8 19 / 68%), transparent 70%);
+  content: '';
+  pointer-events: none;
 }
 
 .sport-project-detail-card.is-hidden .sport-project-detail-card__front {
@@ -1879,6 +1939,15 @@ onBeforeUnmount(() => {
   width: 29px;
   height: 29px;
   object-fit: contain;
+  filter:
+    brightness(0)
+    saturate(100%)
+    invert(42%)
+    sepia(29%)
+    saturate(1047%)
+    hue-rotate(186deg)
+    brightness(92%)
+    contrast(93%);
 }
 
 .sport-project-detail-card__mini-icon > strong {
@@ -2690,10 +2759,12 @@ onBeforeUnmount(() => {
 
   .sport-project-card:hover {
     z-index: 2;
-    border-color: rgb(255 255 255 / 68%);
+    border-color: color-mix(in srgb, var(--project-secondary) 62%, rgb(215 232 255 / 52%));
     box-shadow:
-      inset 0 1px 0 rgb(255 255 255 / 44%),
-      0 22px 43px color-mix(in srgb, var(--project-primary) 27%, transparent);
+      inset 0 1px 0 rgb(218 233 255 / 18%),
+      0 17px 30px rgb(3 8 22 / 32%),
+      0 30px 58px color-mix(in srgb, var(--project-primary) 38%, transparent),
+      0 0 34px color-mix(in srgb, var(--project-secondary) 19%, transparent);
     transform: translate3d(0, -6px, 0) scale(1.018);
   }
 
@@ -2702,7 +2773,7 @@ onBeforeUnmount(() => {
   }
 
   .sport-project-card:hover::before {
-    background-position: -100% 50%, 0 0;
+    opacity: 0.72;
   }
 
   .sport-project-card:hover .sport-project-card__meta svg {

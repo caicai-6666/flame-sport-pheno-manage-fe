@@ -72,10 +72,13 @@ Authorization: Bearer <admin-token>
 
 响应中的 `avatar_url` 是后续头像中转查询的输入，不直接作为浏览器图片地址。前端通过管理端头像接口获取经过认证和媒体类型校验的图片二进制。
 
+工作台用户目录同时维护 `season_user_id → user_id` 关系。赛季结算参与者接口已经返回完整用户资料时会直接写入目录；这些 `user_id` 后续传给 `getOrLoad` 时不会再次调用本接口。
+
 ## 关联代码
 
 - 接口模块：`src/api/user/userInfoApi.js`
 - 分批与展示适配：`src/services/levelEnrollmentMembers.js`
+- 用户资料与赛季用户关系目录：`src/services/userProfileCatalog.js`
 - 页面编排：`src/components/layout/MainWorkspaceShell.vue`
 - 等级卡片：`src/components/dashboard/ChallengeLevelEnrollmentCard.vue`
 - 头像中转接口：`description/api/image/avatar.md`

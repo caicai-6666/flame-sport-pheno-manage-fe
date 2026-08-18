@@ -74,6 +74,8 @@ export default defineConfig(({ command, mode }) => {
       host: environment.VITE_DEV_SERVER_HOST?.trim() || '127.0.0.1',
       port: readDevelopmentServerPort(environment),
       strictPort: true,
+      // 仅接受既定开发域名，兼容新入口的同时保留现有开发地址。
+      allowedHosts: ['phenosolar.cloud', 'pheno.szkl.com'],
     }
   }
 

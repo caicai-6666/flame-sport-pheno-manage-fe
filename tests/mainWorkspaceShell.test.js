@@ -59,7 +59,15 @@ test('主工作台可以完成初始化渲染', async () => {
         title: '各等级报名人数',
         items: [{ name: '青铜', value: 1 }],
         membersByItem: {
-          青铜: [{ id: 'user-1', name: '张三', department: '研发部' }],
+          青铜: [{
+            id: 'user-1',
+            name: '张三',
+            department: '研发部',
+            projectProgresses: [
+              { projectId: 1, projectName: '跑步/快走', progress: 75 },
+              { projectId: 2, projectName: '健身打卡', progress: 40 },
+            ],
+          }],
         },
         selectedName: '青铜',
         detailTitleSuffix: '等级',
@@ -70,6 +78,9 @@ test('主工作台可以完成初始化渲染', async () => {
     assert.match(enrollmentHtml, /报名人员 · 1 人/)
     assert.match(enrollmentHtml, />张三</)
     assert.match(enrollmentHtml, /研发部/)
+    assert.match(enrollmentHtml, /项目进度/)
+    assert.match(enrollmentHtml, /跑步\/快走/)
+    assert.match(enrollmentHtml, />75%<\/em>/)
   } finally {
     await viteServer.close()
   }

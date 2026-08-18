@@ -35,6 +35,7 @@ import { createRewardDeliveryView } from '../../services/rewardDeliveryDashboard
 import { createUserSuggestionView } from '../../services/userSuggestionDashboard.js'
 import { createUserProfileCatalog } from '../../services/userProfileCatalog.js'
 import {
+  attachProjectProgressesToMembers,
   createEmptyProjectEnrollmentView,
   createProjectEnrollmentView,
 } from '../../services/projectEnrollmentDashboard.js'
@@ -107,6 +108,7 @@ const levelDetailError = ref('')
 const projectEnrollments = ref([])
 const allProjects = ref([])
 const projectEnrollmentMembers = ref({})
+const projectProgressesByUserId = ref({})
 const isProjectListLoading = ref(true)
 const projectListError = ref('')
 const isProjectParticipantLoading = ref(true)
@@ -275,6 +277,17 @@ function handleProofReviewed({ recordId, finalReview }) {
           : members,
       ]),
     )
+
+    const currentProjectProgresses = projectProgressesByUserId.value[reviewedRecord.userId] ?? []
+    projectProgressesByUserId.value = {
+      ...projectProgressesByUserId.value,
+      [reviewedRecord.userId]: currentProjectProgresses.map((projectProgress) => (
+        projectProgress.projectId === reviewedRecord.projectId
+          ? { ...projectProgress, progress: nextProgress }
+          : projectProgress
+      )),
+    }
+    refreshLevelMemberProjectProgresses()
   }
 
   // 审核队列由父组件持有，切换到其他待办页面后再回来也不会重复出现已处理记录。
@@ -544,7 +557,10 @@ async function handleLevelSelected({ name, userIds }) {
     if (levelMemberRequestController !== requestController) return
     levelEnrollmentMembers.value = {
       ...levelEnrollmentMembers.value,
-      [name]: members,
+      [name]: attachProjectProgressesToMembers(
+        members,
+        projectProgressesByUserId.value,
+      ),
     }
     loadedLevelNames.add(name)
     isLevelDetailLoading.value = false
@@ -617,6 +633,8 @@ async function loadProjectCatalog() {
     const emptyView = createEmptyProjectEnrollmentView(visibleProjects)
     projectEnrollments.value = emptyView.items
     projectEnrollmentMembers.value = emptyView.membersByProject
+    projectProgressesByUserId.value = emptyView.projectProgressesByUserId
+    refreshLevelMemberProjectProgresses()
     isProjectListLoading.value = false
 
     await loadProjectIcons(projectCatalog, {
@@ -667,6 +685,8 @@ async function loadProjectCatalog() {
     projectEnrollments.value = []
     allProjects.value = []
     projectEnrollmentMembers.value = {}
+    projectProgressesByUserId.value = {}
+    refreshLevelMemberProjectProgresses()
     projectListError.value = '项目基础信息获取失败，请稍后重试'
     return null
   } finally {
@@ -713,6 +733,8 @@ async function handleProjectUpdated(updatedProject) {
       currentMembersByName[currentEnrollmentById.get(project.id)?.name] ?? [],
     ]),
   )
+  projectProgressesByUserId.value = emptyView.projectProgressesByUserId
+  refreshLevelMemberProjectProgresses()
 }
 
 function handleProjectCreated({ project, iconFile }) {
@@ -947,17 +969,36 @@ function cacheParticipantMembersByLevel(participantMembers) {
   const nextMembersByLevel = { ...levelEnrollmentMembers.value }
 
   Object.entries(levelEnrollmentUserIds.value).forEach(([levelName, userIds]) => {
-    // 项目统计已批量取得全部人员资料，按 user_id 回填等级缓存，避免点击饼图后重复查询。
-    if (loadedLevelNames.has(levelName) || activeLevelRequestName === levelName) return
+    if (loadedLevelNames.has(levelName) || activeLevelRequestName === levelName) {
+      // 等级名单可能先于项目聚合完成，后到的用户项目模型只补充进度，不覆盖头像状态。
+      nextMembersByLevel[levelName] = attachProjectProgressesToMembers(
+        nextMembersByLevel[levelName] ?? [],
+        projectProgressesByUserId.value,
+      )
+      return
+    }
 
-    nextMembersByLevel[levelName] = userIds.flatMap((userId) => {
+    const levelMembers = userIds.flatMap((userId) => {
       const member = memberByUserId.get(userId)
       return member ? [member] : []
     })
+    nextMembersByLevel[levelName] = attachProjectProgressesToMembers(
+      levelMembers,
+      projectProgressesByUserId.value,
+    )
     loadedLevelNames.add(levelName)
   })
 
   levelEnrollmentMembers.value = nextMembersByLevel
+}
+
+function refreshLevelMemberProjectProgresses() {
+  levelEnrollmentMembers.value = Object.fromEntries(
+    Object.entries(levelEnrollmentMembers.value).map(([levelName, members]) => [
+      levelName,
+      attachProjectProgressesToMembers(members, projectProgressesByUserId.value),
+    ]),
+  )
 }
 
 async function loadProjectEnrollment(participants, projects, participantMembersSource = null) {
@@ -966,6 +1007,8 @@ async function loadProjectEnrollment(participants, projects, participantMembersS
   projectParticipantRequestController = requestController
   isProjectParticipantLoading.value = true
   projectParticipantError.value = ''
+  projectProgressesByUserId.value = {}
+  refreshLevelMemberProjectProgresses()
 
   try {
     const recordsByProjectId = await loadProjectParticipantRecords(
@@ -983,8 +1026,6 @@ async function loadProjectEnrollment(participants, projects, participantMembersS
           { signal: requestController.signal },
         )
     if (projectParticipantRequestController !== requestController) return
-    cacheParticipantMembersByLevel(participantMembers)
-
     const enrollmentView = createProjectEnrollmentView(
       projects,
       recordsByProjectId,
@@ -992,6 +1033,8 @@ async function loadProjectEnrollment(participants, projects, participantMembersS
     )
     projectEnrollments.value = enrollmentView.items
     projectEnrollmentMembers.value = enrollmentView.membersByProject
+    projectProgressesByUserId.value = enrollmentView.projectProgressesByUserId
+    cacheParticipantMembersByLevel(participantMembers)
     isProjectParticipantLoading.value = false
     return participantMembers
   } catch (error) {
@@ -1004,6 +1047,8 @@ async function loadProjectEnrollment(participants, projects, participantMembersS
     }
 
     requestController.abort()
+    projectProgressesByUserId.value = {}
+    refreshLevelMemberProjectProgresses()
     projectParticipantError.value = '项目报名情况获取失败，请稍后重试'
   } finally {
     if (projectParticipantRequestController === requestController) {
@@ -1278,6 +1323,9 @@ async function loadDashboardData() {
     if (rewardMembers) await loadDashboardMemberAvatars(rewardMembers)
     return
   }
+
+  // 赛季参赛主键与用户主键先进入全局目录，后续业务只需按 season_user_id 取用户资料。
+  userProfileCatalog.linkSeasonUsers(season.participants)
 
   participantInfoRequestController?.abort()
   const participantRequestController = new AbortController()
@@ -1671,7 +1719,11 @@ onBeforeUnmount(() => {
           :inert="activeWorkspaceIndex !== 2"
         >
           <KeepAlive>
-            <UserAffairsPage :active="activeWorkspaceIndex === 2" />
+            <UserAffairsPage
+              :active="activeWorkspaceIndex === 2"
+              :project-rule-catalog="projectRuleCatalog"
+              :user-profile-catalog="userProfileCatalog"
+            />
           </KeepAlive>
         </main>
       </div>

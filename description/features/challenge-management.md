@@ -11,6 +11,8 @@
 - 等级名称。
 - 达成该等级挑战后的奖励积分。
 
+等级正面采用整张深色液态徽章卡，不再使用彩色上半区加白色奖励底栏。青铜、白银和黄金按名称匹配铜、银、金材质；其他自定义等级按 ID 稳定分配蓝宝石、紫晶或翡翠主题。PixiJS 围绕中央奖章绘制多层闭合液态等高线，默认持续轻微呼吸、漂移和反向旋转，悬停时切换到更快、更强的动态档位；该结构不复用赛季卡片的流带、液滴和位移过滤器。
+
 等级数据来自 `GET /project-level/list`，包含等级 ID、名称和奖励积分。接口返回全部等级，并已按 `reward ASC, id ASC` 排序；前端保留该顺序。卡片不展示项目规则，因为规则属于“运动项目 + 挑战等级”的组合配置，不是等级自身字段。
 
 列表在挑战等级子页首次选中并挂载时请求；平台配置通过 `KeepAlive` 保留子页实例，后续切换回来不会重复请求。加载期间展示同步状态，空数组展示空状态，异常时展示安全提示和重试入口。
@@ -29,6 +31,8 @@
 ### 运动项目
 
 管理员选择“运动项目”后，右侧内容区以卡片展示走路、跑步、羽毛球、篮球、爬山和健身。
+
+已有项目使用深色星河卡片：PixiJS 绘制紫、粉、蓝、青、金五层弯曲星云带、局部星云核心、不同深度的彩色星尘和少量带拖尾星点。星河在默认状态下缓慢迁移，悬停或键盘聚焦时增强流速、视差、星云宽度和拖尾长度；每个项目按稳定 ID 生成不同的轨道与配色顺序。项目放大翻转期间沿用同一视觉，新建项目入口不渲染星河。透明黑色项目图标在星河正面转为冷调亮色轮廓，在规则背面转为与项目主色一致的深色轮廓。不可见卡片、详情背面和新建表单打开期间暂停渲染，系统启用减少动态效果时只保留静态星河画面。
 
 点击任一项目时，卡片会从原位置向中央放大并同步翻转。背面按青铜、白银、黄金划分等级区域，每个等级下的规则统一使用以下形式：
 
@@ -87,6 +91,7 @@
 - 等级概览组件：`src/components/configuration/ChallengeLevelConfiguration.vue`
 - 新建等级表单：`src/components/configuration/ChallengeLevelCreateSheet.vue`
 - 项目规则概览：`src/components/configuration/SportProjectConfiguration.vue`
+- 项目星河表面：`src/components/configuration/PixiProjectGalaxy.vue`
 - 新建项目表单：`src/components/configuration/SportProjectCreateSheet.vue`
 - 平台配置页面：`src/components/configuration/PlatformConfigurationPage.vue`
 - 组件说明：`description/components/configuration/ChallengeLevelConfiguration.md`
@@ -96,5 +101,6 @@
 - 单等级规则修改接口：`description/api/project/project-rule-update.md`
 - 项目创建接口：`description/api/project/project-create.md`
 - 项目组件说明：`description/components/configuration/SportProjectConfiguration.md`
+- 项目星河说明：`description/components/configuration/PixiProjectGalaxy.md`
 - 平台配置说明：`description/features/platform-configuration.md`
 - 数据结构：`description/db/project-level.md`、`description/db/project-rule.md`

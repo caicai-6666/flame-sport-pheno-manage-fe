@@ -22,6 +22,10 @@ const props = defineProps({
     type: String,
     required: true,
   },
+  contentFlipped: {
+    type: Boolean,
+    default: false,
+  },
 })
 
 const emit = defineEmits(['update:modelValue'])
@@ -81,6 +85,7 @@ function selectItem(item) {
             'has-image': item.iconSrc,
             'needs-blend': item.iconNeedsBlend,
           }"
+          :style="{ '--workspace-module-image-scale': item.iconScale ?? 1 }"
           aria-hidden="true"
         >
           <img v-if="item.iconSrc" :src="item.iconSrc" alt="" />
@@ -93,12 +98,15 @@ function selectItem(item) {
       </button>
     </nav>
 
-    <section
-      class="workspace-module-layout__content"
-      :aria-label="`${activeItem?.label ?? ''}内容`"
-    >
-      <slot :active-item="activeItem"></slot>
-    </section>
+    <div class="workspace-module-layout__content-scene">
+      <section
+        class="workspace-module-layout__content"
+        :class="{ 'is-flipped': contentFlipped }"
+        :aria-label="`${activeItem?.label ?? ''}内容`"
+      >
+        <slot :active-item="activeItem"></slot>
+      </section>
+    </div>
   </section>
 </template>
 
@@ -120,6 +128,12 @@ function selectItem(item) {
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 86%),
     0 18px 40px rgb(47 63 54 / 8%);
+}
+
+.workspace-module-layout__content-scene {
+  min-width: 0;
+  min-height: 0;
+  perspective: 1800px;
 }
 
 .workspace-module-layout__sidebar {
@@ -282,7 +296,7 @@ function selectItem(item) {
   object-fit: contain;
   opacity: 0.82;
   pointer-events: none;
-  transform: translate(-50%, -50%);
+  transform: translate(-50%, -50%) scale(var(--workspace-module-image-scale, 1));
   transform-origin: center;
   transition:
     opacity 360ms ease;
@@ -391,12 +405,30 @@ function selectItem(item) {
 
 .workspace-module-layout__content {
   position: relative;
-  overflow: hidden;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: visible;
   background:
     radial-gradient(circle at 90% 8%, color-mix(in srgb, var(--workspace-module-accent) 8%, transparent), transparent 30%),
     radial-gradient(circle at 7% 92%, rgb(61 162 135 / 5%), transparent 28%),
     rgb(255 255 255 / 48%);
-  transition: background 520ms ease;
+  transform: rotateY(0deg);
+  transform-style: preserve-3d;
+  transition:
+    background 520ms ease,
+    transform 620ms cubic-bezier(0.2, 0.72, 0.18, 1),
+    box-shadow 620ms ease;
+  will-change: transform;
+}
+
+.workspace-module-layout__content.is-flipped {
+  transform: rotateY(180deg);
+}
+
+.workspace-module-layout__content :slotted(*) {
+  /* 业务面板是外层玻璃卡片与正反面之间的中间节点，必须继续传递三维空间。 */
+  transform-style: preserve-3d;
 }
 
 .workspace-module-layout__content::after {
@@ -484,6 +516,10 @@ function selectItem(item) {
   .workspace-module-nav-item__icon img,
   .workspace-module-nav-item__state,
   .workspace-module-nav-item__state i {
+    transition: none;
+  }
+
+  .workspace-module-layout__content {
     transition: none;
   }
 

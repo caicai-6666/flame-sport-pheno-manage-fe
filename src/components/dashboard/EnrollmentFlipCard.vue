@@ -67,6 +67,20 @@ function handleAvatarLoad(memberId) {
   readyAvatarIds.value = new Set(readyAvatarIds.value).add(memberId)
 }
 
+function normalizeProgress(value) {
+  const numericValue = Number(value)
+  if (!Number.isFinite(numericValue)) return 0
+  return Math.min(100, Math.max(0, Math.round(numericValue)))
+}
+
+function getMemberProgressLabel(member) {
+  const projects = member.projectProgresses ?? []
+  if (projects.length === 0) return `${member.name}，${member.department ?? ''}`
+  return `${member.name}，项目进度：${projects.map((project) => (
+    `${project.projectName} ${normalizeProgress(project.progress)}%`
+  )).join('，')}`
+}
+
 function clearFocusFallback() {
   if (focusFallbackTimer === null) return
 
@@ -174,7 +188,13 @@ onBeforeUnmount(() => {
             <li v-else-if="selectedMembers.length === 0" class="enrollment-flip-card__empty">
               {{ emptyMessage }}
             </li>
-            <li v-for="member in visibleMembers" :key="member.id">
+            <li
+              v-for="member in visibleMembers"
+              :key="member.id"
+              :class="{ 'has-project-progresses': member.projectProgresses?.length }"
+              :tabindex="member.projectProgresses?.length ? 0 : null"
+              :aria-label="getMemberProgressLabel(member)"
+            >
               <span
                 class="enrollment-flip-card__avatar"
                 :class="{
@@ -200,7 +220,30 @@ onBeforeUnmount(() => {
                   {{ member.detail || member.department }}
                 </small>
               </span>
-              <time v-if="member.participatedAt">{{ member.participatedAt }}</time>
+              <span
+                v-if="member.projectProgresses?.length"
+                class="enrollment-flip-card__progress-hint"
+                aria-hidden="true"
+              >
+                项目进度
+              </span>
+              <time v-else-if="member.participatedAt">{{ member.participatedAt }}</time>
+
+              <span
+                v-if="member.projectProgresses?.length"
+                class="enrollment-flip-card__project-progresses"
+                aria-hidden="true"
+              >
+                <span
+                  v-for="project in member.projectProgresses"
+                  :key="project.projectId"
+                  class="enrollment-flip-card__project-progress"
+                >
+                  <small :title="project.projectName">{{ project.projectName }}</small>
+                  <i><b :style="{ width: `${normalizeProgress(project.progress)}%` }"></b></i>
+                  <em>{{ normalizeProgress(project.progress) }}%</em>
+                </span>
+              </span>
             </li>
           </ul>
         </slot>
@@ -352,8 +395,9 @@ onBeforeUnmount(() => {
 }
 
 .enrollment-flip-card__members li {
+  position: relative;
   display: grid;
-  min-height: 62px;
+  min-height: 68px;
   padding: 10px 12px;
   align-items: center;
   gap: 12px;
@@ -361,6 +405,17 @@ onBeforeUnmount(() => {
   border: 1px solid rgb(71 86 77 / 6%);
   border-radius: 15px;
   grid-template-columns: 40px 1fr auto;
+  overflow: hidden;
+  transition:
+    border-color 260ms ease,
+    box-shadow 320ms ease,
+    transform 320ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.enrollment-flip-card__members li:focus-visible {
+  border-color: rgb(113 98 213 / 32%);
+  box-shadow: 0 0 0 3px rgb(113 98 213 / 12%);
+  outline: none;
 }
 
 .enrollment-flip-card__avatar {
@@ -452,6 +507,103 @@ onBeforeUnmount(() => {
   gap: 3px;
 }
 
+.enrollment-flip-card__avatar,
+.enrollment-flip-card__member-copy,
+.enrollment-flip-card__progress-hint,
+.enrollment-flip-card__members time {
+  transition:
+    filter 280ms ease,
+    opacity 240ms ease,
+    transform 320ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.enrollment-flip-card__progress-hint {
+  padding: 4px 7px;
+  color: #7064c9;
+  font-size: 9px;
+  font-weight: 760;
+  background: rgb(119 104 214 / 9%);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.enrollment-flip-card__project-progresses {
+  position: absolute;
+  z-index: 3;
+  inset: 5px 8px;
+  display: grid;
+  padding: 3px 7px;
+  overflow-y: auto;
+  color: #44524a;
+  background:
+    radial-gradient(circle at 100% 0%, rgb(124 109 218 / 11%), transparent 42%),
+    rgb(251 252 250 / 98%);
+  border-radius: 11px;
+  opacity: 0;
+  pointer-events: none;
+  align-content: center;
+  gap: 3px;
+  transform: translateY(8px) scale(0.98);
+  transition:
+    opacity 240ms ease,
+    transform 360ms cubic-bezier(0.16, 1, 0.3, 1);
+  scrollbar-width: none;
+}
+
+.enrollment-flip-card__project-progress {
+  display: grid;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  grid-template-columns: minmax(42px, 0.72fr) minmax(44px, 1fr) 29px;
+}
+
+.enrollment-flip-card__project-progress small {
+  overflow: hidden;
+  color: #5c6962;
+  font-size: 9px;
+  font-weight: 690;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.enrollment-flip-card__project-progress i {
+  height: 5px;
+  overflow: hidden;
+  background: rgb(77 94 84 / 9%);
+  border-radius: 999px;
+}
+
+.enrollment-flip-card__project-progress i b {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, #7568d3, #5ba8d5 50%, #50b799);
+  border-radius: inherit;
+  box-shadow: 0 0 7px rgb(102 91 199 / 24%);
+}
+
+.enrollment-flip-card__project-progress em {
+  color: #65736b;
+  font-size: 9px;
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.enrollment-flip-card__members li.has-project-progresses:focus-visible
+  > :not(.enrollment-flip-card__project-progresses) {
+  filter: blur(2px);
+  opacity: 0;
+  transform: translateY(-5px);
+}
+
+.enrollment-flip-card__members li.has-project-progresses:focus-visible
+  .enrollment-flip-card__project-progresses {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+}
+
 .enrollment-flip-card__member-copy strong {
   overflow: hidden;
   font-size: 13px;
@@ -507,6 +659,26 @@ onBeforeUnmount(() => {
 }
 
 @media (hover: hover) {
+  .enrollment-flip-card__members li.has-project-progresses:hover {
+    border-color: rgb(113 98 213 / 18%);
+    box-shadow: 0 8px 20px rgb(62 54 111 / 10%);
+    transform: translateY(-1px);
+  }
+
+  .enrollment-flip-card__members li.has-project-progresses:hover
+    > :not(.enrollment-flip-card__project-progresses) {
+    filter: blur(2px);
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+
+  .enrollment-flip-card__members li.has-project-progresses:hover
+    .enrollment-flip-card__project-progresses {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0) scale(1);
+  }
+
   .enrollment-flip-card__back-head button:hover {
     background-position: 100% 100%;
     box-shadow:
@@ -552,7 +724,9 @@ onBeforeUnmount(() => {
   }
 
   .enrollment-flip-card__avatar img,
-  .enrollment-flip-card__avatar > span {
+  .enrollment-flip-card__avatar > span,
+  .enrollment-flip-card__members li,
+  .enrollment-flip-card__project-progresses {
     transition: none;
   }
 
