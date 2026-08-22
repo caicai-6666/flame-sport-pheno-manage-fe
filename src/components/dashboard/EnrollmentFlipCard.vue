@@ -283,8 +283,8 @@ onBeforeUnmount(() => {
   min-width: 0;
   overflow: hidden;
   padding: clamp(20px, 2vw, 30px);
-  background: rgb(255 255 255 / 56%);
-  border: 1px solid rgb(255 255 255 / 74%);
+  background: rgb(255 255 255 / 88%);
+  border: 1px solid rgb(255 255 255 / 90%);
   border-radius: 27px;
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 78%),

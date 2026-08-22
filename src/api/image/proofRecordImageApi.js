@@ -24,7 +24,7 @@ function normalizeProofRecordId(proofRecordId) {
   return normalizedId
 }
 
-// 浏览器只提交待终审记录主键，凭证文件定位和业务归属校验统一留在后端完成。
+// 浏览器只提交待终审或智能查询结果中的凭证主键，文件定位和业务归属校验统一留在后端完成。
 export async function getProofRecordImage(proofRecordId, { signal } = {}) {
   const normalizedId = normalizeProofRecordId(proofRecordId)
   const response = await adminFetch(`image/proof_record/${normalizedId}`, {
@@ -32,7 +32,6 @@ export async function getProofRecordImage(proofRecordId, { signal } = {}) {
     headers: {
       Accept: Array.from(ALLOWED_PROOF_IMAGE_MEDIA_TYPES).join(', '),
     },
-    cache: 'no-store',
     signal,
   })
 

@@ -39,7 +39,7 @@ const userAffairItems = [
   },
   {
     id: 'exchange-records',
-    label: '兑换记录',
+    label: '积分与兑换',
     accent: '#d87d4a',
     iconSrc: exchangeRecordsIcon,
     iconScale: 0.78,

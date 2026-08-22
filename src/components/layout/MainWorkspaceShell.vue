@@ -1858,7 +1858,37 @@ onBeforeUnmount(() => {
   min-height: 600px;
   overflow: hidden;
   color: #1e2923;
-  background: linear-gradient(145deg, rgb(252 252 249 / 94%), rgb(239 243 240 / 88%));
+  /* 工作台背景采用低频拼接纹理，避免大面积纯白与内部半透明卡片失去层次。 */
+  --workspace-pattern-size: 100px;
+  --workspace-pattern-coral: #f8b195;
+  --workspace-pattern-navy: #355c7d;
+  --workspace-pattern-gradient:
+    var(--workspace-pattern-navy) 4% 14%,
+    var(--workspace-pattern-coral) 14% 24%,
+    var(--workspace-pattern-navy) 22% 34%,
+    var(--workspace-pattern-coral) 34% 44%,
+    var(--workspace-pattern-navy) 44% 56%,
+    var(--workspace-pattern-coral) 56% 66%,
+    var(--workspace-pattern-navy) 66% 76%,
+    var(--workspace-pattern-coral) 76% 86%,
+    var(--workspace-pattern-navy) 86% 96%;
+  background:
+    radial-gradient(
+      100% 100% at 100% 0,
+      var(--workspace-pattern-coral) 4%,
+      var(--workspace-pattern-gradient),
+      #0008 96%,
+      #0000
+    ),
+    radial-gradient(
+      100% 100% at 0 100%,
+      #0000,
+      #0008 4%,
+      var(--workspace-pattern-gradient),
+      var(--workspace-pattern-coral) 96%
+    )
+    var(--workspace-pattern-coral);
+  background-size: var(--workspace-pattern-size) var(--workspace-pattern-size);
   border: 1px solid rgb(255 255 255 / 78%);
   border-radius: clamp(28px, 3vw, 44px);
   box-shadow:
@@ -1906,6 +1936,7 @@ onBeforeUnmount(() => {
   min-height: 92px;
   padding: 18px clamp(24px, 3vw, 46px);
   align-items: center;
+  background: rgb(255 249 246 / 70%);
   grid-template-columns: 1fr auto 1fr;
   border-bottom: 1px solid rgb(50 66 57 / 8%);
 }
@@ -1955,7 +1986,7 @@ onBeforeUnmount(() => {
   width: clamp(220px, 28vw, 330px);
   padding: 5px;
   gap: 4px;
-  background: rgb(221 226 223 / 68%);
+  background: rgb(221 226 223 / 80%);
   border: 1px solid rgb(255 255 255 / 68%);
   border-radius: 999px;
   box-shadow: inset 0 1px 3px rgb(61 75 68 / 7%);
@@ -2107,8 +2138,8 @@ onBeforeUnmount(() => {
   min-width: 0;
   overflow: hidden;
   padding: clamp(20px, 2vw, 30px);
-  background: rgb(255 255 255 / 56%);
-  border: 1px solid rgb(255 255 255 / 74%);
+  background: rgb(255 255 255 / 88%);
+  border: 1px solid rgb(255 255 255 / 90%);
   border-radius: 27px;
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 78%),
@@ -2518,13 +2549,13 @@ onBeforeUnmount(() => {
   font: inherit;
   text-align: left;
   appearance: none;
-  background: linear-gradient(115deg, rgb(255 255 255 / 78%), rgb(255 255 255 / 48%));
+  background: linear-gradient(115deg, rgb(255 255 255 / 94%), rgb(255 255 255 / 84%));
   border: 1px solid var(--queue-border);
   border-radius: 20px;
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 82%),
     0 6px 18px rgb(47 63 54 / 5%);
-  grid-template-columns: 42px minmax(0, 1fr) auto 28px;
+  grid-template-columns: 42px minmax(0, 1fr) minmax(54px, auto) 28px;
   transform: translate3d(0, 0, 0) scale(1);
   will-change: transform;
   transition:
@@ -2718,8 +2749,8 @@ onBeforeUnmount(() => {
 
 .queue-list__count {
   display: inline-flex;
-  min-width: 42px;
-  min-height: 25px;
+  min-width: 54px;
+  min-height: 32px;
   align-items: baseline;
   justify-content: flex-end;
   gap: 3px;
@@ -2765,8 +2796,9 @@ onBeforeUnmount(() => {
 
 .queue-list__number-roller {
   display: inline-flex;
-  min-width: 29px;
-  height: 25px;
+  min-width: 36px;
+  height: 32px;
+  padding-inline: 1px;
   overflow: hidden;
   align-items: center;
   justify-content: flex-end;
@@ -2776,18 +2808,24 @@ onBeforeUnmount(() => {
 .queue-list__digit-slot {
   position: relative;
   display: inline-grid;
-  width: 0.58em;
-  height: 25px;
-  flex: 0 0 0.58em;
+  width: 0.72em;
+  height: 32px;
+  flex: 0 0 0.72em;
   align-items: center;
   justify-items: center;
   font-size: 25px;
   font-variant-numeric: tabular-nums;
 }
 
-.queue-list__digit-slot strong {
+.queue-list__count .queue-list__digit-slot strong {
+  display: grid;
+  width: 100%;
+  height: 100%;
   grid-area: 1 / 1;
   font-size: inherit;
+  letter-spacing: 0;
+  line-height: 1;
+  place-items: center;
 }
 
 /* 每个数位独立滚动，处理一项时未变化的十位或百位保持静止。 */
@@ -2876,8 +2914,8 @@ onBeforeUnmount(() => {
   width: 28px;
   height: 28px;
   color: var(--queue-color);
-  background: rgb(255 255 255 / 58%);
-  border: 1px solid rgb(255 255 255 / 72%);
+  background: rgb(255 255 255 / 88%);
+  border: 1px solid rgb(255 255 255 / 86%);
   border-radius: 50%;
   box-shadow: 0 5px 13px rgb(53 69 61 / 6%);
   place-items: center;

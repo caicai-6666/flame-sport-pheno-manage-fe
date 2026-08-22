@@ -19,7 +19,7 @@
 ## 2. 当前项目基线
 
 - 本仓库是燃动现象管理端前端项目。
-- 当前技术基线为 Vue 3、Vite 和 JavaScript，使用 ES Modules。
+- 当前技术基线为 Vue 3、Vite 和 JavaScript，使用 ES Modules；页面局部视觉效果可使用已安装的 PixiJS 与 Three.js，Three.js 仅应按需加载，避免影响主页面首屏包体积。
 - 以 `package.json` 中的依赖和脚本作为实际开发、构建命令的依据。
 - 当前常用命令为：`npm run dev`、`npm run build`、`npm run preview`。
 - 客户端前端、后端接口及数据库已有既定设计。管理端开发应优先适配现有业务模型和接口契约，不擅自扩大改动范围。

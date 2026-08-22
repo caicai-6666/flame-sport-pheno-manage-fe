@@ -84,7 +84,7 @@ fetch(resolveApiRequestPath('seasons'))
 开发模式下示例结果为 `/dev/flame/admin/api/seasons`，生产模式下为 `/flame/admin/api/seasons`。调用方只传接口根路径之后的相对部分，不传 `/dev`、`/flame/admin/api` 或开头斜杠。
 
 > [!NOTE]
-> 当前项目尚未接入真实接口，上述模块先建立统一路径边界。后续新增服务模块时应复用该能力。
+> 当前真实接口均通过上述统一路径边界访问。后续新增服务模块也必须复用该能力，不能在业务代码中写死环境前缀。
 
 ## 前端开发服务
 

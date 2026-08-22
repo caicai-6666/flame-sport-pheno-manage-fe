@@ -3,7 +3,7 @@
 > [!IMPORTANT]
 > 本文件是 `description/` 的统一导航入口，只负责说明文档位置、职责和推荐阅读顺序，不重复记录业务规则、接口字段或实现细节。
 
-项目当前处于原型阶段。部分分类暂时没有实际文档，将在对应功能开始设计或开发时按需创建。
+项目已进入功能收口阶段，架构、功能、组件、接口和数据库文档均已形成稳定分类。本地图只反映当前仓库中已经存在的资料；尚未确定的能力在对应功能文档中单独标记。
 
 ---
 
@@ -11,16 +11,17 @@
 
 | 文档 | 定位 | 状态 |
 | --- | --- | --- |
+| [`../README.md`](../README.md) | 项目能力、技术栈、开发运行与部署入口 | `已建立` |
 | [`../AGENTS.md`](../AGENTS.md) | 智能体开发约定与标准工作流程 | `已建立` |
-| [`project.md`](project.md) | 项目定位、核心玩法和管理端原型范围 | `原型版` |
+| [`project.md`](project.md) | 项目定位、核心玩法、管理端范围和职责边界 | `已建立` |
 | [`document-style.md`](document-style.md) | Markdown 写作、排版和文档模板规范 | `已建立` |
 
 > [!TIP]
-> 第一次参与项目时，建议依次阅读：`AGENTS.md` → 本文档 → `project.md` → `document-style.md`。
+> 第一次参与项目时，建议依次阅读：根 `README.md` → `AGENTS.md` → 本文档 → `project.md` → `document-style.md`。
 
 ---
 
-## 文档目录规划
+## 文档目录
 
 ```text
 description/
@@ -34,7 +35,7 @@ description/
 └── db/                       # 纯数据库结构说明
 ```
 
-`architecture/`、`features/`、`components/` 和 `api/` 当前为规划目录。无需提前创建空目录，在产生第一份对应文档时按约定层级创建即可。
+新增文档时应继续放入职责匹配的现有目录；没有实际内容时不创建空文档或空目录。
 
 ---
 
@@ -73,19 +74,19 @@ description/
 
 回答“一个完整业务功能如何运作”。功能文档用于串联页面、组件、接口和状态变化，并记录该模块特有的业务规则与异常流程。
 
-当前原型建议逐步建立：
+当前已建立：
 
-| 建议文档 | 内容范围 | 状态 |
+| 文档 | 内容范围 | 状态 |
 | --- | --- | --- |
 | [`features/admin-authentication.md`](features/admin-authentication.md) | 管理密钥登录、令牌会话恢复与失效处理 | `已建立` |
 | [`features/dashboard.md`](features/dashboard.md) | 当前赛季卡片、正式参赛等级统计与看板异常状态 | `已建立` |
-| [`features/season-management.md`](features/season-management.md) | 赛季列表、新增、编辑和状态管理 | `原型版` |
-| [`features/challenge-management.md`](features/challenge-management.md) | 项目、挑战等级、规则和上传配置 | `原型版` |
-| [`features/platform-configuration.md`](features/platform-configuration.md) | 平台配置入口、页面切换与模块范围 | `原型版` |
-| [`features/user-affairs.md`](features/user-affairs.md) | 用户事务入口、页面切换与三类业务范围 | `原型版` |
-| [`features/proof-review.md`](features/proof-review.md) | 运动凭证查询、逐条查看和终审 | `原型版` |
-| [`features/mall-management.md`](features/mall-management.md) | 商品、兑换记录和奖品发放管理 | `原型版` |
-| [`features/user-suggestion-management.md`](features/user-suggestion-management.md) | 新用户意见查看与后续处理边界 | `原型版` |
+| [`features/season-management.md`](features/season-management.md) | 赛季列表、新建、活动海报和当前维护边界 | `已建立` |
+| [`features/challenge-management.md`](features/challenge-management.md) | 项目、挑战等级、规则和上传配置 | `已建立` |
+| [`features/platform-configuration.md`](features/platform-configuration.md) | 平台配置入口、页面切换与模块范围 | `已建立` |
+| [`features/user-affairs.md`](features/user-affairs.md) | 用户事务入口、赛季结算与记录查询边界 | `已建立` |
+| [`features/proof-review.md`](features/proof-review.md) | 运动凭证查询、逐条查看和终审 | `已建立` |
+| [`features/mall-management.md`](features/mall-management.md) | 商品配置、积分与兑换查询和奖品发放管理 | `已建立` |
+| [`features/user-suggestion-management.md`](features/user-suggestion-management.md) | 用户意见查看、处理与现有数据边界 | `已建立` |
 
 ### 组件文档
 
@@ -122,11 +123,11 @@ description/
 - [`components/dashboard/SeasonTaskListPanel.md`](components/dashboard/SeasonTaskListPanel.md)：数据看板独立聚焦框中的通用待办列表。
 - [`components/layout/MainWorkspaceShell.md`](components/layout/MainWorkspaceShell.md)：登录后的悬浮式管理工作台外壳。
 - [`components/layout/WorkspaceModuleLayout.md`](components/layout/WorkspaceModuleLayout.md)：平台配置与用户事务共用的左栏模块页面骨架。
-- [`components/user-affairs/UserAffairsPage.md`](components/user-affairs/UserAffairsPage.md)：赛季结算、运动记录和兑换记录的用户事务页面骨架。
+- [`components/user-affairs/UserAffairsPage.md`](components/user-affairs/UserAffairsPage.md)：赛季结算、运动记录和积分与兑换的用户事务页面骨架。
 - [`components/user-affairs/SeasonSettlementPanel.md`](components/user-affairs/SeasonSettlementPanel.md)：查看当前结算赛季、正式参赛用户及积分状态的列表面板。
 - [`components/user-affairs/PixiLiquidReviewButton.md`](components/user-affairs/PixiLiquidReviewButton.md)：使用 PixiJS 绘制悬停液态反馈的待终审记录入口。
 - [`components/user-affairs/SettlementFinalizeDialog.md`](components/user-affairs/SettlementFinalizeDialog.md)：要求输入赛季确认短语的一键结算高风险确认弹窗。
-- [`components/user-affairs/ProofRecordQueryPanel.md`](components/user-affairs/ProofRecordQueryPanel.md)：复用于运动与兑换记录、按 JSON 键动态渲染表格并导出结果的智能查询面板。
+- [`components/user-affairs/ProofRecordQueryPanel.md`](components/user-affairs/ProofRecordQueryPanel.md)：复用于运动记录与积分与兑换、按 JSON 键动态渲染表格并导出结果的智能查询面板。
 - [`components/visual/FlowingGradientBackground.md`](components/visual/FlowingGradientBackground.md)：全屏 WebGL 流动渐变背景组件。
 - [`components/visual/FloatingSportIcons.md`](components/visual/FloatingSportIcons.md)：运动图标偶发漂移与鼠标排斥组件。
 
@@ -169,6 +170,7 @@ description/
 - [`api/suggestion/suggestion-list.md`](api/suggestion/suggestion-list.md)：获取可见用户意见，并渐进加载提交用户头像。
 - [`api/suggestion/suggestion-process.md`](api/suggestion/suggestion-process.md)：将可见用户意见标记为已优化或拒绝，并处理幂等、冲突与提交状态。
 - [`api/settlement/season-settlement.md`](api/settlement/season-settlement.md)：获取当前结算赛季、批量查询正式参赛用户、处理结算终审并幂等发放赛季积分。
+- [`api/agent/query-agent.md`](api/agent/query-agent.md)：创建智能查询、通过 Bearer `fetch` 订阅 SSE、提交人工交互、取消任务并读取轨迹与表格结果。
 
 ### 数据库文档
 
@@ -186,27 +188,32 @@ description/
 
 - [`department.md`](db/department.md)：部门表。
 - [`user.md`](db/user.md)：用户表。
-- [`user_suggestion.md`](db/user_suggestion.md)：用户建议表。
+- [`user-suggestion.md`](db/user-suggestion.md)：用户建议表。
 
 ### 赛季与挑战
 
 - [`season.md`](db/season.md)：赛季表。
 - [`project.md`](db/project.md)：运动项目表。
 - [`project-level.md`](db/project-level.md)：挑战等级表。
-- [`project_rule.md`](db/project_rule.md)：项目等级规则表。
-- [`project_upload_config.md`](db/project_upload_config.md)：项目上传配置表。
-- [`season_user.md`](db/season_user.md)：用户赛季参与表。
-- [`season_user_project.md`](db/season_user_project.md)：用户赛季项目及进度表。
+- [`project-rule.md`](db/project-rule.md)：项目等级规则表。
+- [`project-upload-config.md`](db/project-upload-config.md)：项目上传配置表。
+- [`season-user.md`](db/season-user.md)：用户赛季参与表。
+- [`season-user-project.md`](db/season-user-project.md)：用户赛季项目及进度表。
+- [`season-supplement-eligibility.md`](db/season-supplement-eligibility.md)：赛季结算补传资格表。
 
 ### 凭证与排行榜
 
-- [`proof_record.md`](db/proof_record.md)：运动凭证及审核状态表。
-- [`leaderboard_snapshot.md`](db/leaderboard_snapshot.md)：排行榜快照表。
+- [`proof-record.md`](db/proof-record.md)：运动凭证及审核状态表。
+- [`leaderboard-snapshot.md`](db/leaderboard-snapshot.md)：排行榜快照表。
 
 ### 积分商城
 
 - [`product.md`](db/product.md)：商城商品表。
-- [`point_record.md`](db/point_record.md)：全局积分流水表。
+- [`point-record.md`](db/point-record.md)：全局积分流水表。
+
+### 通知
+
+- [`notification.md`](db/notification.md)：用户通知及钉钉任务状态表。
 
 > [!NOTE]
 > 当前尚无独立的兑换订单与奖品发放状态数据库文档。相关管理功能开发前需要以后端契约或后续数据库设计为准。
@@ -262,8 +269,6 @@ project.md
 | 状态 | 含义 |
 | --- | --- |
 | `已建立` | 文档已经存在，并可作为当前开发依据 |
-| `原型版` | 已覆盖当前核心范围，后续会随产品演进补充 |
-| `待创建` | 已规划定位，但尚未进入对应设计或开发阶段 |
 | `待确认` | 存在未明确的业务规则、接口契约或数据来源 |
 
 ---

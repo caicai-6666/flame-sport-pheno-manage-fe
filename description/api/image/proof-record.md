@@ -3,7 +3,7 @@
 本文档描述管理前端通过管理端后端安全取得运动凭证图片，以及前端按审核进度分批加载图片的策略。
 
 > [!IMPORTANT]
-> 前端只提交待终审接口返回的凭证 `id`。用户 ID、赛季 ID、`image_url` 和文件路径均不参与图片请求。
+> 前端只提交待终审接口或智能查询结果中 `proof_record_id` 对应的凭证 `id`。用户 ID、赛季 ID、`image_url` 和文件路径均不参与图片请求。
 
 ---
 
@@ -54,6 +54,6 @@ Authorization: Bearer <access-token>
 
 - 接口模块：`src/api/image/proofRecordImageApi.js`
 - 分批调度：`src/services/proofRecordImageScheduler.js`
-- 页面编排：`src/components/layout/MainWorkspaceShell.vue`
+- 页面编排：`src/components/layout/MainWorkspaceShell.vue`、`src/components/user-affairs/ProofRecordQueryPanel.vue`
 - 图片视图：`src/components/dashboard/SeasonProofReviewDeck.vue`
 - 自动化测试：`tests/adminAuthentication.test.js`
