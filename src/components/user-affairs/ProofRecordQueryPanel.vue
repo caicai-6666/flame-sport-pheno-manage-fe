@@ -2536,8 +2536,8 @@ onMounted(() => {
   padding: 12px 14px 12px 54px;
   color: #34433c;
   font: inherit;
-  /* 仅让自然语言提问区域带一点手写感，不干扰管理端其他数据与状态文字的阅读效率。 */
-  font-family: "ZCOOL KuaiLe", "HanziPen SC", "STXingkai", "KaiTi", "Kaiti SC", "Chalkboard SE", cursive;
+  /* 提问区域继承全局默认字体，确保输入内容与查询轨迹、结果表格保持一致。 */
+  font-family: inherit;
   font-size: 14px;
   font-weight: 400;
   letter-spacing: 0.025em;
@@ -4306,7 +4306,7 @@ onMounted(() => {
   place-items: center;
 }
 
-/* 省略符改由三个 CSS 圆点绘制，避免手绘字体的字面宽度撑出微型节点。 */
+/* 省略符改由三个 CSS 圆点绘制，避免微型节点被字符字面宽度撑出容器。 */
 .proof-query-history-dialog__timeline li.is-trajectory-omitted .proof-query-history-dialog__timeline-dot::after {
   width: 10px;
   height: 3px;

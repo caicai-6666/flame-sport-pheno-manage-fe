@@ -800,7 +800,7 @@ onBeforeUnmount(() => {
   height: 100%;
   padding: 0 10px;
   color: #e0e0d0;
-  font-family: "ZCOOL KuaiLe", "Consolas", "Courier New", monospace;
+  font-family: "Consolas", "Courier New", monospace;
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.07em;

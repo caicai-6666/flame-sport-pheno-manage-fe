@@ -1858,37 +1858,7 @@ onBeforeUnmount(() => {
   min-height: 600px;
   overflow: hidden;
   color: #1e2923;
-  /* 工作台背景采用低频拼接纹理，避免大面积纯白与内部半透明卡片失去层次。 */
-  --workspace-pattern-size: 100px;
-  --workspace-pattern-coral: #f8b195;
-  --workspace-pattern-navy: #355c7d;
-  --workspace-pattern-gradient:
-    var(--workspace-pattern-navy) 4% 14%,
-    var(--workspace-pattern-coral) 14% 24%,
-    var(--workspace-pattern-navy) 22% 34%,
-    var(--workspace-pattern-coral) 34% 44%,
-    var(--workspace-pattern-navy) 44% 56%,
-    var(--workspace-pattern-coral) 56% 66%,
-    var(--workspace-pattern-navy) 66% 76%,
-    var(--workspace-pattern-coral) 76% 86%,
-    var(--workspace-pattern-navy) 86% 96%;
-  background:
-    radial-gradient(
-      100% 100% at 100% 0,
-      var(--workspace-pattern-coral) 4%,
-      var(--workspace-pattern-gradient),
-      #0008 96%,
-      #0000
-    ),
-    radial-gradient(
-      100% 100% at 0 100%,
-      #0000,
-      #0008 4%,
-      var(--workspace-pattern-gradient),
-      var(--workspace-pattern-coral) 96%
-    )
-    var(--workspace-pattern-coral);
-  background-size: var(--workspace-pattern-size) var(--workspace-pattern-size);
+  background: #fff;
   border: 1px solid rgb(255 255 255 / 78%);
   border-radius: clamp(28px, 3vw, 44px);
   box-shadow:
