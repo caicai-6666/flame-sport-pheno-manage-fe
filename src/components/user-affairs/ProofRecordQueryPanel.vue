@@ -239,6 +239,40 @@ function isInteractionAnswered(item) {
   return getTrajectoryEntryType(item) === 'interaction_answered'
 }
 
+const PLAN_FIELD_REVIEW_OPTIONS = new Set(['确认并继续', '修正查询'])
+
+// 规划阶段的字段核对仍属于 confirmation；以受控选项识别，避免依赖后端提示文案的细微变化。
+function isPlanFieldReviewInteraction(interaction) {
+  const options = interaction?.options
+  return interaction?.type === 'confirmation'
+    && Array.isArray(options)
+    && options.length === PLAN_FIELD_REVIEW_OPTIONS.size
+    && options.every((option) => PLAN_FIELD_REVIEW_OPTIONS.has(option))
+}
+
+function isPlanFieldRevisionInteraction(interaction) {
+  return interaction?.type === 'clarification'
+    && /修正查询|增加、删除或改名的字段|调整结果布局/.test(interaction.question ?? '')
+}
+
+function getInteractionEyebrow(interaction) {
+  if (isPlanFieldReviewInteraction(interaction)) return '请确认结果字段'
+  return interaction?.type === 'clarification' ? '需要补充信息' : '需要确认'
+}
+
+function getInteractionAnswerTitle(interaction, answer) {
+  if (isPlanFieldReviewInteraction(interaction)) {
+    return answer === '修正查询' ? '已请求修正查询字段' : '已确认结果字段'
+  }
+  return interaction.type === 'confirmation' ? '已提交查询确认' : '已补充查询信息'
+}
+
+function getInteractionTextareaPlaceholder(interaction) {
+  return isPlanFieldRevisionInteraction(interaction)
+    ? '说明需要增加、删除或改名的字段，也可调整结果布局或返回范围'
+    : '输入需要补充的业务事实'
+}
+
 function isTrajectoryExpanded(record) {
   return Boolean(record && trajectoryExpandedByRecordId.value[record.id])
 }
@@ -1031,9 +1065,9 @@ async function submitInteractionAnswer(answer) {
       id: `${record.id}-${interaction.id}-answered`,
       entryType: 'interaction_answered',
       type: 'interaction_answered',
-      stage: interaction.type === 'confirmation' ? 'confirmation' : 'planning',
+      stage: isPlanFieldReviewInteraction(interaction) ? 'planning' : interaction.type === 'confirmation' ? 'confirmation' : 'planning',
       entryStatus: 'success',
-      title: interaction.type === 'confirmation' ? '已提交查询确认' : '已补充查询信息',
+      title: getInteractionAnswerTitle(interaction, normalizedAnswer),
       detail: normalizedAnswer,
       options: [],
       createdAt: formatTaskTime(),
@@ -1665,13 +1699,20 @@ onMounted(() => {
         <form
           v-if="activeQueryTask?.pendingInteraction"
           class="proof-query-live__interaction"
+          :class="{ 'is-field-review': isPlanFieldReviewInteraction(activeQueryTask.pendingInteraction) }"
           @submit.prevent="submitInteractionAnswer(clarificationText)"
         >
           <header>
             <small>
-              {{ activeQueryTask.pendingInteraction.type === 'clarification' ? '需要补充信息' : '需要确认' }}
+              {{ getInteractionEyebrow(activeQueryTask.pendingInteraction) }}
             </small>
             <strong>{{ activeQueryTask.pendingInteraction.question }}</strong>
+            <p
+              v-if="isPlanFieldReviewInteraction(activeQueryTask.pendingInteraction)"
+              class="proof-query-live__field-review-tip"
+            >
+              请核对每行代表的业务对象、展示字段和返回范围；选择“修正查询”后可继续说明调整内容。
+            </p>
           </header>
 
           <div v-if="activeQueryTask.pendingInteraction.options.length" class="proof-query-live__options">
@@ -1700,7 +1741,7 @@ onMounted(() => {
               v-model="clarificationText"
               rows="2"
               maxlength="1000"
-              placeholder="输入需要补充的业务事实"
+              :placeholder="getInteractionTextareaPlaceholder(activeQueryTask.pendingInteraction)"
               :disabled="isInteractionSubmitting"
             ></textarea>
             <span class="proof-query-live__control">
@@ -3125,6 +3166,20 @@ onMounted(() => {
   color: #f1f3f7;
   font-size: 13px;
   line-height: 1.55;
+}
+
+.proof-query-live__interaction.is-field-review {
+  background:
+    radial-gradient(circle at 92% 12%, rgb(144 150 255 / 25%), transparent 38%),
+    linear-gradient(130deg, rgb(53 55 86 / 97%), rgb(44 69 77 / 97%));
+  border-color: rgb(178 188 255 / 27%);
+}
+
+.proof-query-live__field-review-tip {
+  margin: 2px 0 0;
+  color: rgb(218 223 255 / 82%);
+  font-size: 10px;
+  line-height: 1.6;
 }
 
 .proof-query-live__options,
