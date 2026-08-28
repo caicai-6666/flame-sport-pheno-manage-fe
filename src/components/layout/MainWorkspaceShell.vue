@@ -1411,9 +1411,8 @@ async function revealWorkspaceAfterInitialLayout() {
   await waitForInitialLayoutFrame()
   if (isWorkspaceUnmounted) return
 
-  // 预热模块仍由异步组件挂载，等待两个关键卡片实例就绪后才测量完整网格。
-  for (let frameCount = 0; frameCount < 10; frameCount += 1) {
-    if (challengeEnrollmentCardRef.value && projectEnrollmentCardRef.value) break
+  // 不设置固定帧数上限：网络或首次解析较慢时也必须等关键卡片真正挂载，不能显露半成品网格。
+  while (!challengeEnrollmentCardRef.value || !projectEnrollmentCardRef.value) {
     await waitForInitialLayoutFrame()
     if (isWorkspaceUnmounted) return
   }
@@ -1868,8 +1867,6 @@ onBeforeUnmount(() => {
     inset 0 1px 0 rgb(255 255 255 / 92%),
     0 46px 110px rgb(51 59 99 / 24%),
     0 12px 34px rgb(42 83 78 / 13%);
-  -webkit-backdrop-filter: blur(4px) saturate(108%);
-  backdrop-filter: blur(4px) saturate(108%);
   -webkit-user-select: none;
   user-select: none;
   transition: opacity 240ms ease;
@@ -1909,10 +1906,8 @@ onBeforeUnmount(() => {
   min-height: 92px;
   padding: 18px clamp(24px, 3vw, 46px);
   align-items: center;
-  background: rgb(249 251 252 / 72%);
+  background: rgb(249 251 252 / 82%);
   border-bottom: 1px solid rgb(71 82 100 / 9%);
-  -webkit-backdrop-filter: blur(16px) saturate(112%);
-  backdrop-filter: blur(16px) saturate(112%);
   grid-template-columns: 1fr auto 1fr;
 }
 

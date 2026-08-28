@@ -25,9 +25,10 @@ const isLoginBusy = computed(() => isAuthenticating.value || isRestoringSession.
 
 let unsubscribeFromSessionInvalidation = () => {}
 
-function preloadDashboardInBackground() {
-  // 数据看板图表较重，不能阻塞已认证管理员进入其他常驻模块；异步组件会在看板实际展示时继续自行解析。
-  void preloadDashboardLayout().catch(() => {})
+async function prepareWorkspaceLayout() {
+  // 登录卡片保持可见，直到决定首屏结构的异步组件解析完毕，避免工作台进入动画中途补出容器。
+  loginNotice.value = '正在生成工作台布局…'
+  await preloadDashboardLayout()
 }
 
 // 使用管理员密钥换取令牌，只有后端确认成功后才进入工作台。
@@ -40,10 +41,12 @@ async function handleLogin(adminKey) {
 
   try {
     await loginAdmin(adminKey)
+    await prepareWorkspaceLayout()
     isWorkspaceVisible.value = true
-    preloadDashboardInBackground()
+    loginNotice.value = ''
   } catch (error) {
     loginError.value = error instanceof Error ? error.message : '登录失败，请稍后重试'
+    loginNotice.value = ''
   } finally {
     isAuthenticating.value = false
   }
@@ -82,9 +85,9 @@ async function restoreAdminSession() {
   try {
     const isAuthenticated = await validateAdminSession()
     if (isAuthenticated) {
+      await prepareWorkspaceLayout()
       loginNotice.value = ''
       isWorkspaceVisible.value = true
-      preloadDashboardInBackground()
       return
     }
 
@@ -92,7 +95,10 @@ async function restoreAdminSession() {
     loginNotice.value = '登录状态已失效，请重新验证'
   } catch (error) {
     if (error?.name !== 'AdminAuthenticationRequiredError') {
-      loginError.value = '暂时无法验证登录状态，请重新登录'
+      loginError.value =
+        error?.name === 'DashboardLayoutPreloadError'
+          ? error.message
+          : '暂时无法验证登录状态，请重新登录'
       loginNotice.value = ''
     }
   } finally {
