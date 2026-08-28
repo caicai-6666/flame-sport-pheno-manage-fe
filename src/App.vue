@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { loginAdmin, validateAdminSession } from './api/auth/adminAuthApi.js'
 import AccessKeyLoginCard from './components/auth/AccessKeyLoginCard.vue'
 import MainWorkspaceShell from './components/layout/MainWorkspaceShell.vue'
-import FlowingGradientBackground from './components/visual/FlowingGradientBackground.vue'
+import MolecularFieldBackground from './components/visual/MolecularFieldBackground.vue'
 import { usePreventPageZoom } from './composables/usePreventPageZoom.js'
 import {
   clearAdminSession,
@@ -22,10 +22,6 @@ const isWorkspaceVisible = ref(false)
 const loginError = ref('')
 const loginNotice = ref('')
 const isLoginBusy = computed(() => isAuthenticating.value || isRestoringSession.value)
-
-// 登录阶段提高色彩流速以呼应赛季卡片，进入工作台后降速，避免背景抢夺数据注意力。
-const loginBackgroundSpeed = 1.5
-const workspaceBackgroundSpeed = 0.55
 
 let unsubscribeFromSessionInvalidation = () => {}
 
@@ -118,9 +114,7 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="welcome-page">
-    <FlowingGradientBackground
-      :speed="isWorkspaceVisible ? workspaceBackgroundSpeed : loginBackgroundSpeed"
-    />
+    <MolecularFieldBackground />
 
     <Transition name="workspace-zoom">
       <div v-if="!isWorkspaceVisible" key="login" class="welcome-page__stage welcome-page__stage--login">

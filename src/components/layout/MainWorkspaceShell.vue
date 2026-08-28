@@ -1858,15 +1858,18 @@ onBeforeUnmount(() => {
   min-height: 600px;
   overflow: hidden;
   color: #1e2923;
-  background: #fff;
-  border: 1px solid rgb(255 255 255 / 78%);
+  background:
+    radial-gradient(circle at 12% 4%, rgb(118 192 170 / 5%), transparent 30%),
+    radial-gradient(circle at 94% 92%, rgb(118 111 219 / 6%), transparent 34%),
+    rgb(249 251 252 / 78%);
+  border: 1px solid rgb(255 255 255 / 86%);
   border-radius: clamp(28px, 3vw, 44px);
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 92%),
-    0 46px 110px rgb(38 44 85 / 28%),
-    0 12px 34px rgb(35 68 66 / 15%);
-  -webkit-backdrop-filter: blur(34px) saturate(120%);
-  backdrop-filter: blur(34px) saturate(120%);
+    0 46px 110px rgb(51 59 99 / 24%),
+    0 12px 34px rgb(42 83 78 / 13%);
+  -webkit-backdrop-filter: blur(4px) saturate(108%);
+  backdrop-filter: blur(4px) saturate(108%);
   -webkit-user-select: none;
   user-select: none;
   transition: opacity 240ms ease;
@@ -1906,9 +1909,11 @@ onBeforeUnmount(() => {
   min-height: 92px;
   padding: 18px clamp(24px, 3vw, 46px);
   align-items: center;
-  background: rgb(255 249 246 / 70%);
+  background: rgb(249 251 252 / 72%);
+  border-bottom: 1px solid rgb(71 82 100 / 9%);
+  -webkit-backdrop-filter: blur(16px) saturate(112%);
+  backdrop-filter: blur(16px) saturate(112%);
   grid-template-columns: 1fr auto 1fr;
-  border-bottom: 1px solid rgb(50 66 57 / 8%);
 }
 
 .workspace-shell__brand,
@@ -1926,7 +1931,7 @@ onBeforeUnmount(() => {
   display: grid;
   width: 50px;
   height: 50px;
-  background: rgb(255 255 255 / 68%);
+  background: rgb(255 255 255 / 76%);
   border: 1px solid rgb(255 255 255 / 90%);
   border-radius: 17px;
   box-shadow: 0 9px 24px rgb(43 63 53 / 10%);
@@ -1956,7 +1961,7 @@ onBeforeUnmount(() => {
   width: clamp(220px, 28vw, 330px);
   padding: 5px;
   gap: 4px;
-  background: rgb(221 226 223 / 80%);
+  background: rgb(221 226 230 / 82%);
   border: 1px solid rgb(255 255 255 / 68%);
   border-radius: 999px;
   box-shadow: inset 0 1px 3px rgb(61 75 68 / 7%);
@@ -2108,12 +2113,12 @@ onBeforeUnmount(() => {
   min-width: 0;
   overflow: hidden;
   padding: clamp(20px, 2vw, 30px);
-  background: rgb(255 255 255 / 88%);
+  background: rgb(250 252 252 / 89%);
   border: 1px solid rgb(255 255 255 / 90%);
   border-radius: 27px;
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 78%),
-    0 18px 40px rgb(47 63 54 / 8%);
+    0 18px 40px rgb(52 66 78 / 9%);
 }
 
 .dashboard-card__head,

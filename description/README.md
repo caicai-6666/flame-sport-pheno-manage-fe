@@ -128,8 +128,7 @@ description/
 - [`components/user-affairs/PixiLiquidReviewButton.md`](components/user-affairs/PixiLiquidReviewButton.md)：使用 PixiJS 绘制悬停液态反馈的待终审记录入口。
 - [`components/user-affairs/SettlementFinalizeDialog.md`](components/user-affairs/SettlementFinalizeDialog.md)：要求输入赛季确认短语的一键结算高风险确认弹窗。
 - [`components/user-affairs/ProofRecordQueryPanel.md`](components/user-affairs/ProofRecordQueryPanel.md)：复用于运动记录与积分与兑换、按 JSON 键动态渲染表格并导出结果的智能查询面板。
-- [`components/visual/FlowingGradientBackground.md`](components/visual/FlowingGradientBackground.md)：全屏 WebGL 流动渐变背景组件。
-- [`components/visual/FloatingSportIcons.md`](components/visual/FloatingSportIcons.md)：运动图标偶发漂移与鼠标排斥组件。
+- [`components/visual/MolecularFieldBackground.md`](components/visual/MolecularFieldBackground.md)：登录页与工作台共用的交互式公司分子场背景。
 
 ### API 文档
 

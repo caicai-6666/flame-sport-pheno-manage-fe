@@ -73,7 +73,7 @@ select {
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
-  background: linear-gradient(135deg, #8b7eea, #55c9d4 48%, #f38b75);
+  background: #f7f9fa;
 }
 
 .welcome-page__stage {

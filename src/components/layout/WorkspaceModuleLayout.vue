@@ -122,12 +122,12 @@ function selectItem(item) {
 .workspace-module-layout__sidebar,
 .workspace-module-layout__content {
   min-width: 0;
-  background: rgb(255 255 255 / 86%);
+  background: rgb(250 252 252 / 87%);
   border: 1px solid rgb(255 255 255 / 92%);
   border-radius: 27px;
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 86%),
-    0 18px 40px rgb(47 63 54 / 8%);
+    0 18px 40px rgb(52 66 78 / 9%);
 }
 
 .workspace-module-layout__content-scene {
@@ -412,7 +412,7 @@ function selectItem(item) {
   background:
     radial-gradient(circle at 90% 8%, color-mix(in srgb, var(--workspace-module-accent) 8%, transparent), transparent 30%),
     radial-gradient(circle at 7% 92%, rgb(61 162 135 / 5%), transparent 28%),
-    rgb(255 255 255 / 84%);
+    rgb(250 252 252 / 86%);
   transform: rotateY(0deg);
   transform-style: preserve-3d;
   transition:
