@@ -106,7 +106,7 @@ export async function buildDynamicJsonWorkbook({ title, query, rows }) {
     properties: { tabColor: { argb: HEADER_FILL } },
   })
 
-  workbook.creator = '燃动现象管理端'
+  workbook.creator = '燃动现象智能管理平台'
   workbook.created = new Date()
   worksheet.getCell(1, 1).value = title
   worksheet.getCell(2, 1).value = `查询条件：${query}`

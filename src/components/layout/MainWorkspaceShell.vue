@@ -1476,7 +1476,7 @@ onBeforeUnmount(() => {
       'is-layout-ready': isInitialLayoutReady,
       'has-dashboard-focus': Boolean(activeEnrollmentFocus || activeTaskPage),
     }"
-    aria-label="燃动现象管理工作台"
+    aria-label="燃动现象智能管理平台工作台"
     :aria-busy="!isInitialLayoutReady"
     :aria-hidden="!isInitialLayoutReady"
     :inert="!isInitialLayoutReady"
@@ -1487,7 +1487,7 @@ onBeforeUnmount(() => {
           <img :src="brandLogo" alt="" draggable="false" />
         </span>
         <span class="workspace-shell__brand-copy">
-          <strong>燃动现象</strong>
+          <strong>燃动现象智能管理平台</strong>
         </span>
       </div>
 
@@ -1948,6 +1948,7 @@ onBeforeUnmount(() => {
   font-size: 17px;
   font-weight: 800;
   letter-spacing: 0.06em;
+  white-space: nowrap;
 }
 
 .workspace-shell__nav {

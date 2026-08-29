@@ -111,11 +111,11 @@ onBeforeUnmount(() => {
     <div ref="contentRef" class="access-key-card__content">
       <header class="access-key-card__header">
         <div class="access-key-card__logo-wrap">
-          <img class="access-key-card__logo" :src="brandLogo" alt="燃动现象标志" draggable="false" />
+          <img class="access-key-card__logo" :src="brandLogo" alt="燃动现象智能管理平台标志" draggable="false" />
         </div>
 
         <div class="access-key-card__heading">
-          <h1 id="access-key-title">燃动现象管理端</h1>
+          <h1 id="access-key-title">燃动现象智能管理平台</h1>
           <div class="access-key-card__accent" aria-hidden="true">
             <span></span>
             <span></span>
@@ -143,9 +143,9 @@ onBeforeUnmount(() => {
           >
             <span class="access-key-card__field-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24">
-                <path d="M7.5 10V7.75a4.5 4.5 0 0 1 9 0V10" />
-                <rect x="5" y="10" width="14" height="10" rx="3" />
-                <path d="M12 14v2.5" />
+                <path d="M8 9.5V7a4 4 0 0 1 8 0v2.5" />
+                <rect x="5.25" y="9.5" width="13.5" height="10.5" rx="1.25" />
+                <path d="M12 13.75v2.75" />
               </svg>
             </span>
 
@@ -195,7 +195,7 @@ onBeforeUnmount(() => {
               type="submit"
               :disabled="isSubmitting"
               :aria-busy="isSubmitting"
-              :aria-label="isSubmitting ? '正在验证密钥' : '验证密钥并进入管理端'"
+              :aria-label="isSubmitting ? '正在验证密钥' : '验证密钥并进入智能管理平台'"
             >
               <Transition name="access-key-submit-icon" mode="out-in">
                 <span

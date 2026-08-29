@@ -29,7 +29,7 @@ test('主工作台可以完成初始化渲染', async () => {
     const html = await renderToString(createSSRApp(workspaceModule.default))
 
     assert.equal(layoutModules.length, 2)
-    assert.match(html, /燃动现象管理工作台/)
+    assert.match(html, /燃动现象智能管理平台工作台/)
     assert.match(html, /数据看板/)
     assert.match(html, /is-layout-preparing/)
     assert.match(html, /aria-busy="true"/)

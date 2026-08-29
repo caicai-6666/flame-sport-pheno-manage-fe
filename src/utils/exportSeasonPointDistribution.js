@@ -92,7 +92,7 @@ export async function buildSeasonPointDistributionWorkbook(season, records) {
     properties: { tabColor: { argb: HEADER_FILL } },
   })
 
-  workbook.creator = '燃动现象管理端'
+  workbook.creator = '燃动现象智能管理平台'
   workbook.created = new Date()
 
   const projectCount = Math.max(...records.map((record) => record.projects.length), 0)
