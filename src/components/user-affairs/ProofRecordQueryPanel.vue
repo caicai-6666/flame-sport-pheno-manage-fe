@@ -3127,6 +3127,8 @@ onMounted(() => {
   color: #6d7a74;
   font-size: 11px;
   line-height: 1.65;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .proof-query-live__interaction {
@@ -3166,6 +3168,9 @@ onMounted(() => {
   color: #f1f3f7;
   font-size: 13px;
   line-height: 1.55;
+  overflow-wrap: anywhere;
+  /* 后端会使用空格和换行组织澄清内容的层级，交互面板需保留原始纯文本排版。 */
+  white-space: pre-wrap;
 }
 
 .proof-query-live__interaction.is-field-review {
@@ -4430,7 +4435,14 @@ onMounted(() => {
 
 .proof-query-history-dialog__timeline strong { color: #e3eee8; font-size: 12px; }
 .proof-query-history-dialog__timeline time { margin-left: auto; color: rgb(221 237 229 / 42%); font-size: 9px; font-variant-numeric: tabular-nums; }
-.proof-query-history-dialog__timeline p { margin: 5px 0 0; color: rgb(221 237 229 / 62%); font-size: 11px; line-height: 1.65; }
+.proof-query-history-dialog__timeline p {
+  margin: 5px 0 0;
+  color: rgb(221 237 229 / 62%);
+  font-size: 11px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
 
 .proof-query-history-dialog__timeline-stage {
   padding: 3px 5px;
