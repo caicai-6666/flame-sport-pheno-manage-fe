@@ -83,6 +83,8 @@ export function createSettlementPendingFinalReviewView(
       challengeLevel,
       ruleKey: `${record.projectId}:${levelId}`,
       preliminaryReviewRuleModel,
+      // 结算接口适配层的 reviewComment 当前承载初审意见，在共享终审组件前转换为明确字段。
+      preliminaryReviewComment: record.reviewComment,
       queueIndex: index,
       imageObjectUrl: undefined,
       imageLoading: false,

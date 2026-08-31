@@ -38,7 +38,7 @@ export function createPendingFinalReviewView(records, projects, userMembers) {
       proofDate: record.proofDate,
       proofDateLabel: createProofDateLabel(record.proofDate),
       note: record.note,
-      reviewComment: record.reviewComment,
+      preliminaryReviewComment: record.preliminaryReviewComment,
       tone: RECORD_TONES[index % RECORD_TONES.length],
     }
   })

@@ -729,7 +729,7 @@ onBeforeUnmount(() => {
               </button>
               <div :id="`proof-model-comment-${currentRecord.id}`" class="proof-review-card__thread-bubble" role="tooltip">
                 <span>模型初审评语</span>
-                <p>{{ currentRecord.reviewComment || '暂无初审评语' }}</p>
+                <p>{{ currentRecord.preliminaryReviewComment || '暂无初审评语' }}</p>
               </div>
             </article>
           </div>

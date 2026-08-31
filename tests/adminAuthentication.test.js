@@ -1425,6 +1425,7 @@ test('待终审接口携带参赛记录参数并适配凭证字段', async () =>
         created_at: '2026-08-12T10:30:45',
         proof_date: '2026-08-11',
         note: '晚间跑步 5 公里',
+        preliminary_review_comment: '初审符合单次要求',
         review_comment: null,
       }]),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
@@ -1448,6 +1449,7 @@ test('待终审接口携带参赛记录参数并适配凭证字段', async () =>
     createdAt: '2026-08-12T10:30:45',
     proofDate: '2026-08-11',
     note: '晚间跑步 5 公里',
+    preliminaryReviewComment: '初审符合单次要求',
     reviewComment: null,
   }])
 })
@@ -2976,7 +2978,8 @@ test('待终审记录最多并发 5 个、重试瞬时错误并按全局口径�
       created_at: createdAt,
       proof_date: proofDate,
       note: index === 0 ? '完成跑步' : null,
-      review_comment: '初审通过',
+      preliminary_review_comment: '初审通过',
+      review_comment: null,
     }]), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
@@ -3011,6 +3014,7 @@ test('待终审记录最多并发 5 个、重试瞬时错误并按全局口径�
   assert.equal(view[0].proofDateLabel, '08.12')
   assert.equal(view[0].avatarUrl, '/avatars/user-6.jpg')
   assert.equal(view[0].avatarObjectUrl, 'blob:avatar-user-6')
+  assert.equal(view[0].preliminaryReviewComment, '初审通过')
 })
 
 test('用户详细信息接口使用重复查询参数并适配姓名、部门和头像', async () => {

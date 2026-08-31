@@ -60,6 +60,8 @@ function normalizePendingFinalReview(record) {
     createdAt: record.created_at,
     proofDate: record.proof_date,
     note: normalizeNullableText(record.note),
+    preliminaryReviewComment: normalizeNullableText(record.preliminary_review_comment),
+    // 管理员终审评语与模型初审评语职责不同，禁止用该字段填充初审展示。
     reviewComment: normalizeNullableText(record.review_comment),
   }
 }

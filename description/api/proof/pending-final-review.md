@@ -33,7 +33,8 @@ Authorization: Bearer <access-token>
     "created_at": "2026-08-12T10:30:45",
     "proof_date": "2026-08-11",
     "note": "晚间跑步 5 公里",
-    "review_comment": "距离满足单次要求"
+    "preliminary_review_comment": "距离满足单次要求",
+    "review_comment": null
   }
 ]
 ```
@@ -46,7 +47,8 @@ Authorization: Bearer <access-token>
 | `created_at` | `datetime` | 实际上传时间，ISO 8601 格式 |
 | `proof_date` | `date` | 实际运动日期，`YYYY-MM-DD` 格式 |
 | `note` | `string \| null` | 用户运动备注 |
-| `review_comment` | `string \| null` | 当前模型初审意见 |
+| `preliminary_review_comment` | `string \| null` | 大模型初审意见，详情中的“模型初审评语”只读取该字段 |
+| `review_comment` | `string \| null` | 管理员终审意见；待终审记录通常为 `null`，不得回退用于初审展示 |
 
 没有可终审凭证时返回空数组 `[]` 和 `200 OK`。前端不区分参赛记录不存在、记录已终审或被其他条件排除。
 
@@ -69,6 +71,8 @@ Authorization: Bearer <access-token>
 看板为当前赛季每名正式参赛人员发起一次查询，最大并发为 5。所有人员结果合并后再次按 `proof_date`、`created_at`、`id` 全局倒序，避免逐人响应顺序破坏“最近优先”的展示口径。
 
 每条记录通过查询所对应的 `season_user_id` 取得 `user_id` 和赛季挑战等级，再使用共享的用户资料映射取得姓名与头像地址，并通过 `project_id` 关联已取得的项目名称。用户资料和头像 Blob 由项目报名、等级名单与待终审列表共享，同一批 `user_id` 不重复查询或下载头像。
+
+接口适配层将 `preliminary_review_comment` 映射为 `preliminaryReviewComment`，将 `review_comment` 独立映射为 `reviewComment`。展示适配器只把前者交给初审意见区域，避免尚未终审时因 `review_comment = null` 错误显示“暂无初审评语”。
 
 `image_url` 仅作为待终审接口响应字段完成契约校验，不会直接交给浏览器请求。凭证视图只使用本接口返回的 `id` 调用受保护图片中转接口，避免暴露或依赖内部存储路径。
 

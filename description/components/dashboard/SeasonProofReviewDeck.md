@@ -68,7 +68,7 @@
 | `imageObjectUrl` | 受保护图片接口响应转换出的 Blob URL |
 | `imageLoading`、`imageLoadFailed` | 当前凭证图片的加载与失败状态 |
 | `note` | 用户运动备注，可为空 |
-| `reviewComment` | 模型初审意见，可为空 |
+| `preliminaryReviewComment` | 模型初审意见，可为空；不得使用管理员 `reviewComment` 回退填充 |
 | `tone` | 记录视觉色调 |
 
 ## 事件

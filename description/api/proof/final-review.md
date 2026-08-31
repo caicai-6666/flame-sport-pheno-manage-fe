@@ -30,7 +30,7 @@ Content-Type: application/json
 | 字段 | 类型 | 必填 | 约束 | 说明 |
 | --- | --- | --- | --- | --- |
 | `proof_record_id` | `integer` | 是 | 大于 `0` | 待终审凭证主键 |
-| `review_comment` | `string \| null` | 是 | 非空时去除首尾空白后为 1～500 个字符 | 覆盖初审评语的终审意见 |
+| `review_comment` | `string \| null` | 是 | 非空时去除首尾空白后为 1～500 个字符 | 管理员终审意见；不会覆盖模型初审评语字段 |
 | `decision` | `string` | 是 | `approved` 或 `rejected` | 终审决定 |
 
 管理员未填写评语时，前端不会发送空白字符串，而是根据决定补入以下默认评语：
