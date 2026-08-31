@@ -39,6 +39,8 @@
 
 每个事件必须包含匹配的 `query_id` 和单调递增的正整数 `sequence`。组件按序号去重，将新事件追加到实时链式轨迹底部。连接意外关闭但任务未终止时自动重连，延迟上限为 5 秒；`404` 表示会话已经失效，页面以失败终态收口。
 
+`status` 描述当前事件，不等同于整个查询会话状态。阶段级 `stage_completed` 可以返回 `success`，也可以返回允许工作流降级后继续执行的 `failure`；前端只通过 `query_completed`、`query_failed`、`query_cancelled` 和 `query_abandoned` 判断查询终态，不能用阶段状态提前收口会话。
+
 ---
 
 ## 查询状态

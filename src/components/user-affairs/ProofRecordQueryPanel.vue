@@ -544,9 +544,9 @@ async function refreshCachedQueryHistory() {
 
 function getTaskStatusFromEvent(event, currentStatus = 'running') {
   if (event.eventType === 'query_completed') return 'completed'
-  if (event.eventType === 'query_failed' || event.status === 'failure') return 'failed'
-  if (event.eventType === 'query_cancelled' || event.status === 'cancelled') return 'cancelled'
-  if (event.eventType === 'query_abandoned' || event.status === 'abandoned') return 'abandoned'
+  if (event.eventType === 'query_failed') return 'failed'
+  if (event.eventType === 'query_cancelled') return 'cancelled'
+  if (event.eventType === 'query_abandoned') return 'abandoned'
   if (event.eventType === 'interaction_required') {
     return event.payload?.interaction_type === 'clarification'
       ? 'waiting_for_clarification'
@@ -555,12 +555,17 @@ function getTaskStatusFromEvent(event, currentStatus = 'running') {
   return currentStatus.startsWith('waiting_for_') ? currentStatus : 'running'
 }
 
-function isCurrentRunningTrajectoryNode(item, index) {
+function isCurrentActiveTrajectoryNode(item, index) {
   const task = activeQueryTask.value
   if (!task || isTerminalQueryStatus(task.taskStatus)) return false
 
-  // 早先阶段也可能留下 running 事件，只有链表末端才代表此刻真正执行的位置。
-  return index === task.trajectory.length - 1 && item.entryStatus === 'running'
+  if (index !== task.trajectory.length - 1) return false
+
+  // success / failure 也可表示阶段收口而非查询终态；只要工作流仍在推进，最新智能体节点就应保留动态游标。
+  return item.stage !== 'connection'
+    && item.entryStatus !== 'waiting'
+    && !isInteractionRequested(item)
+    && !isInteractionAnswered(item)
 }
 
 function isCurrentQueryCompletionNode(item, index) {
@@ -1557,7 +1562,7 @@ onMounted(() => {
                 ]"
               >
                 <span
-                  v-if="isCurrentRunningTrajectoryNode(item, index)"
+                  v-if="isCurrentActiveTrajectoryNode(item, index)"
                   :ref="setCurrentRunningNode"
                   class="proof-query-live__loader"
                   aria-hidden="true"

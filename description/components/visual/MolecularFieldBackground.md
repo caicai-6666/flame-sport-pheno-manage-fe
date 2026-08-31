@@ -13,6 +13,7 @@
 - 桌面端固定绘制 300 个分子并使用 800px 能量半径，移动端绘制 80 个分子并使用 400px 能量半径。
 - 让分子缓慢漂移，并以同一径向波控制分子位移、键长、原子尺寸、键宽和辉光。
 - 鼠标位置只作为目标坐标，能量中心通过带阻尼的弹簧速度平滑追随，保留轻微惯性。
+- 支持通过选择器声明业务交互屏蔽区；鼠标位于工作台内部时切回自主呼吸轨迹，不响应指针唤醒或扰动，移出后恢复跟随。
 - 无鼠标输入时使用官网同款复合正弦轨迹驱动虚拟能量中心，并通过同一阻尼层平滑接管，保持持续呼吸。
 - 按距能量中心的距离呈现绿、蓝到近白的连续色带，背景使用官网同款 `#fcfcfc`。
 - Canvas 固定按 1 倍 CSS 像素绘制，避免全屏高像素比持续重绘。
@@ -31,7 +32,7 @@ import MolecularFieldBackground from './components/visual/MolecularFieldBackgrou
 
 <template>
   <main class="page">
-    <MolecularFieldBackground />
+<MolecularFieldBackground interaction-block-selector="[data-molecular-interaction-block]" />
     <section class="page-content">页面内容</section>
   </main>
 </template>
@@ -41,7 +42,11 @@ import MolecularFieldBackground from './components/visual/MolecularFieldBackgrou
 
 ## Props
 
-当前未提供。分子数量、能量半径、颜色和运动参数固定跟随公司官网效果，避免不同调用方产生视觉分支。
+| Prop | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `interactionBlockSelector` | `String` | `''` | 匹配到事件传播路径中的元素时暂停鼠标交互，只保留自主呼吸动画 |
+
+分子数量、能量半径、颜色和运动参数固定跟随公司官网效果，避免不同调用方产生视觉分支。
 
 ## 事件
 
@@ -59,6 +64,7 @@ import MolecularFieldBackground from './components/visual/MolecularFieldBackgrou
 - Worker 内保留官网能量节点的动态辉光；主线程仅在每个动画帧内至多转发一次鼠标位置。
 - 浏览器不支持 `OffscreenCanvas` 或 Worker 初始化失败时，直接保留 `#fcfcfc` 静态背景，不退回主线程动画，也不阻断登录和业务页面。
 - Canvas 设置 `pointer-events: none`，鼠标监听只读取位置，不拦截任何业务交互。
+- 鼠标进入 `interactionBlockSelector` 命中的区域时，组件取消尚未发送的指针帧并向 Worker 发送 `pointer-leave`；判断基于事件传播路径，不在高频移动中读取工作台布局。
 
 ## 依赖与关联代码
 

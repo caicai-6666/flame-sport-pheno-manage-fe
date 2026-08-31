@@ -120,7 +120,7 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="welcome-page">
-    <MolecularFieldBackground />
+    <MolecularFieldBackground interaction-block-selector="[data-molecular-interaction-block]" />
 
     <Transition name="workspace-zoom">
       <div v-if="!isWorkspaceVisible" key="login" class="welcome-page__stage welcome-page__stage--login">

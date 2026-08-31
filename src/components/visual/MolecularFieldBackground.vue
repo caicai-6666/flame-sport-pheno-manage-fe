@@ -1,6 +1,13 @@
 <script setup>
 import { onBeforeUnmount, onMounted, ref } from 'vue'
 
+const props = defineProps({
+  interactionBlockSelector: {
+    type: String,
+    default: '',
+  },
+})
+
 const rootRef = ref(null)
 const canvasRef = ref(null)
 const isReady = ref(false)
@@ -12,6 +19,7 @@ let reducedMotionMedia = null
 let pointerFrame = 0
 let latestPointer = null
 let isIntersecting = true
+let isPointerBlocked = false
 
 function postWorkerMessage(message) {
   if (!animationWorker) return
@@ -36,11 +44,37 @@ function syncWorkerActivity() {
   })
 }
 
+function cancelPendingPointerFrame() {
+  if (!pointerFrame) return
+  window.cancelAnimationFrame(pointerFrame)
+  pointerFrame = 0
+}
+
+function isPointerInsideBlockedArea(event) {
+  const selector = props.interactionBlockSelector.trim()
+  if (!selector) return false
+
+  // 使用事件传播路径识别工作台，无需在高频 pointermove 中反复读取布局边界。
+  return event.composedPath().some(
+    (target) => target instanceof Element && target.matches(selector),
+  )
+}
+
 function handlePointerMove(event) {
   if (event.pointerType === 'touch') return
 
   const root = rootRef.value
   if (!root) return
+
+  if (isPointerInsideBlockedArea(event)) {
+    latestPointer = null
+    cancelPendingPointerFrame()
+    if (!isPointerBlocked) postWorkerMessage({ type: 'pointer-leave' })
+    isPointerBlocked = true
+    return
+  }
+
+  isPointerBlocked = false
 
   const bounds = root.getBoundingClientRect()
   latestPointer = {
@@ -61,7 +95,9 @@ function handlePointerMove(event) {
 function handlePointerLeave(event) {
   // pointerout 会在业务组件之间移动时冒泡到 window；只有真正离开页面才结束鼠标能量场。
   if (event?.type === 'pointerout' && event.relatedTarget) return
+  isPointerBlocked = false
   latestPointer = null
+  cancelPendingPointerFrame()
   postWorkerMessage({ type: 'pointer-leave' })
 }
 
@@ -151,7 +187,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('visibilitychange', handleVisibilityChange)
   reducedMotionMedia?.removeEventListener('change', handleReducedMotionChange)
 
-  if (pointerFrame) window.cancelAnimationFrame(pointerFrame)
+  cancelPendingPointerFrame()
   postWorkerMessage({ type: 'destroy' })
   animationWorker?.terminate()
   animationWorker = null

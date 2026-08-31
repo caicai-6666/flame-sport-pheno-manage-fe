@@ -1471,6 +1471,7 @@ onBeforeUnmount(() => {
   <section
     ref="workspaceShellRef"
     class="workspace-shell"
+    data-molecular-interaction-block
     :class="{
       'is-layout-preparing': !isInitialLayoutReady,
       'is-layout-ready': isInitialLayoutReady,
