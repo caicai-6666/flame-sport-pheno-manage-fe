@@ -114,7 +114,18 @@
     "created_at": "2026-07-30T20:15:00",
     "proof_date": "2026-07-30",
     "note": "晚间跑步 5 公里",
-    "review_comment": "初审符合单次要求"
+    "preliminary_review_comment": "初审符合单次要求",
+    "review_comment": null,
+    "preliminary_review_context_snapshot": {
+      "projectId": 2,
+      "projectName": "跑步/快走",
+      "levelId": 7,
+      "recordType": "日常记录",
+      "ruleContent": [
+        { "label": "单次距离", "value": "不少于 5 公里" }
+      ],
+      "ruleNote": "按凭证判断"
+    }
   }
 ]
 ```
@@ -126,8 +137,9 @@
 - `season_user_id` 只读取赛季结算已经建立的用户目录关系，不再次请求用户详情。
 - `project_id` 关联对应正式参赛用户已经取得的有效项目，接口归属不一致时拒绝展示异常队列。
 - `image_url` 仅用于响应契约兼容，不直接交给浏览器加载；凭证详情继续通过受保护图片中转接口按 `proof_record_id` 获取 Blob。
-- 当前响应没有直接返回 `level_id`。前端通过完整挑战等级目录，利用受唯一约束的等级名称恢复 `level_id`，再与 `project_id` 组成项目规则查询键。
-- 挑战等级目录和项目规则模型在工作台生命周期内缓存；打开相同项目、相同等级的凭证时不重复请求规则。
+- 补传资格存在 `preliminary_review_context_snapshot` 时，前端直接使用其中的 `levelId` 和 `ruleContent` 构造审核要求，不请求当前全局项目规则。
+- 快照为 `null` 的历史记录继续通过完整挑战等级目录恢复 `level_id`，再按 `project_id + level_id` 请求全局规则；快照存在但结构非法时整轮进入失败状态，不静默使用全局规则替代。
+- 全局挑战等级目录和项目规则模型仍在工作台生命周期内缓存，仅服务无快照的兼容记录。
 
 ### 错误处理
 

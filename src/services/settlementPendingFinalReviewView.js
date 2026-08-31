@@ -1,3 +1,5 @@
+import { createProjectRuleModel } from './projectRuleCatalog.js'
+
 const RECORD_TONES = ['violet', 'blue', 'mint', 'orange', 'green']
 
 function createProofDateLabel(proofDate) {
@@ -51,9 +53,22 @@ export function createSettlementPendingFinalReviewView(
     }
     const challengeLevel = participant.levelName ?? participant.level
     const projectLevel = levelByName.get(challengeLevel)
-    if (!projectLevel) {
+    const contextSnapshot = record.preliminaryReviewContextSnapshot
+    if (!contextSnapshot && !projectLevel) {
       throw new Error(`待终审凭证 ${record.id} 无法关联挑战等级`)
     }
+    if (contextSnapshot && projectLevel && contextSnapshot.levelId !== projectLevel.id) {
+      throw new Error(`待终审凭证 ${record.id} 的补传规则快照与参赛等级不一致`)
+    }
+
+    const levelId = contextSnapshot?.levelId ?? projectLevel.id
+    const preliminaryReviewRuleModel = contextSnapshot
+      ? createProjectRuleModel(record.projectId, levelId, {
+        subDesc: null,
+        ruleContent: contextSnapshot.ruleContent,
+        ruleNote: contextSnapshot.ruleNote,
+      })
+      : null
 
     return {
       ...record,
@@ -63,10 +78,11 @@ export function createSettlementPendingFinalReviewView(
       avatarObjectUrl: participant.avatarObjectUrl,
       avatarLoadFailed: false,
       projectName: project.name,
-      // 等级名称受数据库唯一约束，可通过完整等级目录稳定恢复规则所需的 level_id。
-      levelId: projectLevel.id,
+      // 补传记录使用固化等级；只有历史无快照记录才从唯一等级名称恢复 level_id。
+      levelId,
       challengeLevel,
-      ruleKey: `${record.projectId}:${projectLevel.id}`,
+      ruleKey: `${record.projectId}:${levelId}`,
+      preliminaryReviewRuleModel,
       queueIndex: index,
       imageObjectUrl: undefined,
       imageLoading: false,

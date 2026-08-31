@@ -231,6 +231,54 @@ function normalizeNullableText(value, fieldName) {
   return value.trim() || null
 }
 
+function isJsonValue(value) {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true
+  if (typeof value === 'number') return Number.isFinite(value)
+  if (Array.isArray(value)) return value.every(isJsonValue)
+  if (typeof value === 'object') return Object.values(value).every(isJsonValue)
+  return false
+}
+
+// 校验并转换资格创建时固化的审核上下文，避免异常快照被静默替换为当前全局规则。
+function normalizePreliminaryReviewContextSnapshot(snapshot, projectId) {
+  if (snapshot == null) return null
+  if (
+    typeof snapshot !== 'object'
+    || Array.isArray(snapshot)
+    || snapshot.projectId !== projectId
+    || !isPositiveInteger(snapshot.levelId)
+    || !isNonEmptyString(snapshot.projectName)
+    || !isNonEmptyString(snapshot.recordType)
+    || !Array.isArray(snapshot.ruleContent)
+    || typeof snapshot.ruleNote !== 'string'
+  ) {
+    throw new SettlementRequestError('待终审凭证接口返回了无效的补传审核规则快照')
+  }
+
+  const ruleContent = snapshot.ruleContent.map((metric) => {
+    if (
+      !isNonEmptyString(metric?.label)
+      || !Object.hasOwn(metric, 'value')
+      || !isJsonValue(metric.value)
+    ) {
+      throw new SettlementRequestError('待终审凭证接口返回了无效的补传审核规则快照')
+    }
+    return {
+      label: metric.label.trim(),
+      value: metric.value,
+    }
+  })
+
+  return {
+    projectId: snapshot.projectId,
+    projectName: snapshot.projectName.trim(),
+    levelId: snapshot.levelId,
+    recordType: snapshot.recordType.trim(),
+    ruleContent,
+    ruleNote: snapshot.ruleNote.trim() || null,
+  }
+}
+
 function normalizePendingFinalReview(record) {
   if (
     !isPositiveInteger(record?.proof_record_id)
@@ -244,6 +292,13 @@ function normalizePendingFinalReview(record) {
     throw new SettlementRequestError('待终审凭证接口返回了无法识别的数据')
   }
 
+  const preliminaryReviewComment = Object.hasOwn(
+    record,
+    'preliminary_review_comment',
+  )
+    ? record.preliminary_review_comment
+    : record.review_comment
+
   return {
     id: record.proof_record_id,
     seasonUserId: record.season_user_id,
@@ -252,7 +307,11 @@ function normalizePendingFinalReview(record) {
     createdAt: record.created_at,
     proofDate: record.proof_date,
     note: normalizeNullableText(record.note, '运动备注'),
-    reviewComment: normalizeNullableText(record.review_comment, '初审意见'),
+    reviewComment: normalizeNullableText(preliminaryReviewComment, '初审意见'),
+    preliminaryReviewContextSnapshot: normalizePreliminaryReviewContextSnapshot(
+      record.preliminary_review_context_snapshot,
+      record.project_id,
+    ),
   }
 }
 

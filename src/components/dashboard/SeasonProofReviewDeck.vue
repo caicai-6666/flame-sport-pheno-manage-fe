@@ -70,11 +70,16 @@ const imageViewportRef = ref(null)
 const currentRecord = computed(
   () => props.records.find((record) => record.id === selectedRecordId.value) ?? null,
 )
-const currentProjectRuleState = computed(() => (
-  currentRecord.value
-    ? props.projectRuleStates[currentRecord.value.ruleKey] ?? null
-    : null
-))
+const currentProjectRuleState = computed(() => {
+  if (!currentRecord.value) return null
+  if (currentRecord.value.preliminaryReviewRuleModel) {
+    return {
+      status: 'ready',
+      model: currentRecord.value.preliminaryReviewRuleModel,
+    }
+  }
+  return props.projectRuleStates[currentRecord.value.ruleKey] ?? null
+})
 const remainingCount = computed(() => props.records.length)
 const isDeciding = computed(() => isSubmittingReview.value || Boolean(decision.value))
 const imageZoomPercentage = computed(() => Math.round(imageZoom.value * 100))
@@ -255,7 +260,11 @@ function openRecord(record) {
   resetRecordImageView()
   selectedRecordId.value = record.id
   reviewValidationMessage.value = ''
-  if (Number.isInteger(record.levelId) && record.levelId > 0) {
+  if (
+    !record.preliminaryReviewRuleModel
+    && Number.isInteger(record.levelId)
+    && record.levelId > 0
+  ) {
     emit('request-rule', {
       projectId: record.projectId,
       levelId: record.levelId,
@@ -267,6 +276,7 @@ function openRecord(record) {
 function requestCurrentRule() {
   if (
     !currentRecord.value
+    || currentRecord.value.preliminaryReviewRuleModel
     || !Number.isInteger(currentRecord.value.levelId)
     || currentRecord.value.levelId <= 0
   ) return
