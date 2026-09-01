@@ -17,6 +17,16 @@ import {
   normalizeDynamicJsonValue,
 } from '../../utils/exportDynamicJsonTable.js'
 import { getProofRecordImage } from '../../api/image/proofRecordImageApi.js'
+import {
+  findFavoriteQuery,
+  isFavoriteQuery,
+  normalizeFavoriteQuery,
+  readSportsQueryFavorites,
+  removeFavoriteQuery,
+  SPORTS_QUERY_FAVORITES_STORAGE_KEY,
+  toggleFavoriteQuery,
+  writeSportsQueryFavorites,
+} from '../../services/queryFavoriteCatalog.js'
 
 const props = defineProps({
   domain: {
@@ -60,6 +70,7 @@ const queryConfig = computed(() =>
 )
 
 const queryText = ref('')
+const favoriteAlignedQueries = ref([])
 // 查询轨迹与结果分属不同接口：历史列表先读取后端缓存 ID，详情与表格再按 ID 延迟获取。
 const queryHistory = ref([])
 // 当前任务独立于历史归档；只有进入终态后才会写入 queryHistory。
@@ -135,6 +146,24 @@ const currentQueryResult = computed(() =>
     ? queryResultsById.value[activeQueryTask.value.id] ?? null
     : null,
 )
+
+const currentFavoriteQuery = computed(() => {
+  if (!isProofDomain.value || activeQueryTask.value?.taskStatus !== 'completed') return ''
+  // 点击收藏项重新查询时，后端可能再次改写对齐语句；优先命中实际提交文字才能正确保持收藏态。
+  const submittedFavorite = findFavoriteQuery(
+    favoriteAlignedQueries.value,
+    activeQueryTask.value.query,
+  )
+  return submittedFavorite || normalizeFavoriteQuery(activeQueryTask.value.alignedQuestion)
+})
+
+const isCurrentQueryFavorite = computed(() => (
+  isFavoriteQuery(favoriteAlignedQueries.value, currentFavoriteQuery.value)
+))
+
+const canClearCurrentQuery = computed(() => (
+  Boolean(activeQueryTask.value) && !isQuerying.value && !activeQueryTask.value?.pendingInteraction
+))
 
 const currentQueryColumns = computed(() =>
   activeQueryTask.value && currentQueryResult.value?.status === 'success'
@@ -221,6 +250,70 @@ function handleConstrainedVerticalWheel(event) {
 
 function getTaskStatusMeta(status) {
   return taskStatusMeta[status] ?? taskStatusMeta.running
+}
+
+function loadFavoriteAlignedQueries() {
+  if (!isProofDomain.value) return
+  try {
+    favoriteAlignedQueries.value = readSportsQueryFavorites(window.localStorage)
+  } catch {
+    favoriteAlignedQueries.value = []
+  }
+}
+
+function handleFavoriteStorageChange(event) {
+  if (!isProofDomain.value || event.key !== SPORTS_QUERY_FAVORITES_STORAGE_KEY) return
+  loadFavoriteAlignedQueries()
+}
+
+function toggleCurrentQueryFavorite() {
+  const question = currentFavoriteQuery.value
+  if (!question) return
+
+  const toggled = toggleFavoriteQuery(favoriteAlignedQueries.value, question)
+  try {
+    favoriteAlignedQueries.value = writeSportsQueryFavorites(
+      window.localStorage,
+      toggled.favorites,
+    )
+    queryError.value = ''
+  } catch {
+    queryError.value = '收藏保存失败，请检查浏览器本地存储权限'
+  }
+}
+
+function startFavoriteQuery(question) {
+  if (isQuerying.value) return
+  const normalized = normalizeFavoriteQuery(question)
+  if (!normalized) return
+  queryText.value = normalized
+  // 收藏项只提供查询文本，后续创建、SSE、交互与取消完全复用当前查询生命周期。
+  void submitQuery(normalized)
+}
+
+function removeFavoriteAlignedQuery(question) {
+  const nextFavorites = removeFavoriteQuery(favoriteAlignedQueries.value, question)
+  try {
+    favoriteAlignedQueries.value = writeSportsQueryFavorites(window.localStorage, nextFavorites)
+    queryError.value = ''
+  } catch {
+    queryError.value = '收藏删除失败，请检查浏览器本地存储权限'
+  }
+}
+
+function clearCurrentQueryView() {
+  if (!canClearCurrentQuery.value) return
+  window.clearTimeout(terminalArchiveTimer)
+  hideTableCellTooltip()
+  activeQueryTask.value = null
+  pendingQuery.value = ''
+  queryText.value = ''
+  queryError.value = ''
+  exportError.value = ''
+  exportErrorRecordId.value = ''
+  clarificationText.value = ''
+  interactionError.value = ''
+  // Clean 只复位当前工作区；服务端缓存与历史索引仍保留，管理员可从查询历史重新打开。
 }
 
 function getTrajectoryStageMeta(stage) {
@@ -975,11 +1068,12 @@ async function archiveAgentTask(queryId, fallbackStatus, fallbackMessage) {
   if (archivedRecord.taskStatus === 'completed') void loadQueryResult(archivedRecord)
 }
 
-async function submitQuery() {
+async function submitQuery(queryOverride) {
   if (isQuerying.value) return
 
   playQueryPressAnimation()
-  const query = queryText.value.trim()
+  const querySource = typeof queryOverride === 'string' ? queryOverride : queryText.value
+  const query = querySource.trim()
   if (!query) {
     queryError.value = ''
     return
@@ -1418,10 +1512,13 @@ onBeforeUnmount(() => {
   constrainedScrollStates.forEach((state) => window.cancelAnimationFrame(state.frame))
   constrainedScrollStates.clear()
   window.removeEventListener('keydown', handleWindowKeydown)
+  window.removeEventListener('storage', handleFavoriteStorageChange)
 })
 
 onMounted(() => {
+  loadFavoriteAlignedQueries()
   window.addEventListener('keydown', handleWindowKeydown)
+  window.addEventListener('storage', handleFavoriteStorageChange)
 })
 </script>
 
@@ -1525,9 +1622,27 @@ onMounted(() => {
 
     <section
       class="proof-query__result"
-      :class="{ 'has-live-interaction': Boolean(activeQueryTask?.pendingInteraction) }"
+      :class="{
+        'has-live-interaction': Boolean(activeQueryTask?.pendingInteraction),
+        'has-clean-action': canClearCurrentQuery,
+      }"
       aria-live="polite"
     >
+      <Transition name="proof-query-clean-action">
+        <button
+          v-if="canClearCurrentQuery"
+          type="button"
+          class="proof-query-clean-action"
+          aria-label="清除当前查询展示并返回收藏列表"
+          title="清除当前查询"
+          @click="clearCurrentQueryView"
+        >
+          <span class="proof-query-clean-action__shadow" aria-hidden="true"></span>
+          <span class="proof-query-clean-action__edge" aria-hidden="true"></span>
+          <span class="proof-query-clean-action__front">Clean</span>
+        </button>
+      </Transition>
+
       <div
         ref="currentTrajectoryViewport"
         class="proof-query-history"
@@ -1594,29 +1709,48 @@ onMounted(() => {
                       {{ getTrajectoryStageMeta(item.stage).label }}
                     </span>
                     <strong>{{ item.title }}</strong>
-                    <button
+                    <div
                       v-if="isCurrentQueryCompletionNode(item, index) && currentQueryResult?.status === 'success'"
-                      type="button"
-                      class="proof-query-table__download-action proof-query-table__download-action--timeline"
-                      :disabled="!currentQueryResult.rows.length || Boolean(exportingRecordId)"
-                      :aria-busy="exportingRecordId === activeQueryTask.id"
-                      aria-label="下载本次查询结果"
-                      title="下载本次 Excel"
-                      @click="exportResults(activeQueryTask, currentQueryResult)"
+                      class="proof-query-live__completion-actions"
                     >
-                      <span class="proof-query-table__download-text">下载表格</span>
-                      <span class="proof-query-table__download-icon" aria-hidden="true">
-                        <span
-                          v-if="exportingRecordId === activeQueryTask.id"
-                          class="proof-query__spinner"
-                        ></span>
-                        <svg v-else viewBox="0 0 35 35">
-                          <path d="M17.5 22.131a1.249 1.249 0 0 1-1.25-1.25V2.187a1.25 1.25 0 0 1 2.5 0v18.694a1.25 1.25 0 0 1-1.25 1.25Z" />
-                          <path d="M17.5 22.693a3.189 3.189 0 0 1-2.262-.936l-6.751-6.751a1.249 1.249 0 1 1 1.767-1.767l6.751 6.751a.7.7 0 0 0 .99 0l6.751-6.751a1.25 1.25 0 0 1 1.768 1.767l-6.752 6.751a3.191 3.191 0 0 1-2.262.936Z" />
-                          <path d="M31.436 34.063H3.564A3.318 3.318 0 0 1 .25 30.749v-8.738a1.25 1.25 0 0 1 2.5 0v8.738a.815.815 0 0 0 .814.814h27.872a.815.815 0 0 0 .814-.814v-8.738a1.25 1.25 0 1 1 2.5 0v8.738a3.318 3.318 0 0 1-3.314 3.314Z" />
+                      <button
+                        v-if="currentFavoriteQuery"
+                        type="button"
+                        class="proof-query-live__favorite-action"
+                        :class="{ 'is-favorite': isCurrentQueryFavorite }"
+                        :aria-pressed="isCurrentQueryFavorite"
+                        :aria-label="isCurrentQueryFavorite ? '取消收藏查询语句' : '收藏业务对齐语句'"
+                        :title="isCurrentQueryFavorite ? '取消收藏' : '收藏业务对齐语句'"
+                        @click="toggleCurrentQueryFavorite"
+                      >
+                        <svg class="proof-query-live__favorite-icon" viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="m11.645 20.91-.007-.003-.022-.012a15.247 15.247 0 0 1-.383-.218 25.18 25.18 0 0 1-4.244-3.17C4.688 15.36 2.25 12.174 2.25 8.25 2.25 5.322 4.714 3 7.688 3A5.5 5.5 0 0 1 12 5.052 5.5 5.5 0 0 1 16.313 3c2.973 0 5.437 2.322 5.437 5.25 0 3.925-2.438 7.111-4.739 9.256a25.175 25.175 0 0 1-4.244 3.17 15.247 15.247 0 0 1-.383.219l-.022.012-.007.004-.003.001a.752.752 0 0 1-.704 0l-.003-.001Z" />
                         </svg>
-                      </span>
-                    </button>
+                        <span>{{ isCurrentQueryFavorite ? '已收藏' : '收藏' }}</span>
+                      </button>
+                      <button
+                        type="button"
+                        class="proof-query-table__download-action proof-query-table__download-action--timeline"
+                        :disabled="!currentQueryResult.rows.length || Boolean(exportingRecordId)"
+                        :aria-busy="exportingRecordId === activeQueryTask.id"
+                        aria-label="下载本次查询结果"
+                        title="下载本次 Excel"
+                        @click="exportResults(activeQueryTask, currentQueryResult)"
+                      >
+                        <span class="proof-query-table__download-text">下载表格</span>
+                        <span class="proof-query-table__download-icon" aria-hidden="true">
+                          <span
+                            v-if="exportingRecordId === activeQueryTask.id"
+                            class="proof-query__spinner"
+                          ></span>
+                          <svg v-else viewBox="0 0 35 35">
+                            <path d="M17.5 22.131a1.249 1.249 0 0 1-1.25-1.25V2.187a1.25 1.25 0 0 1 2.5 0v18.694a1.25 1.25 0 0 1-1.25 1.25Z" />
+                            <path d="M17.5 22.693a3.189 3.189 0 0 1-2.262-.936l-6.751-6.751a1.249 1.249 0 1 1 1.767-1.767l6.751 6.751a.7.7 0 0 0 .99 0l6.751-6.751a1.25 1.25 0 0 1 1.768 1.767l-6.752 6.751a3.191 3.191 0 0 1-2.262.936Z" />
+                            <path d="M31.436 34.063H3.564A3.318 3.318 0 0 1 .25 30.749v-8.738a1.25 1.25 0 0 1 2.5 0v8.738a.815.815 0 0 0 .814.814h27.872a.815.815 0 0 0 .814-.814v-8.738a1.25 1.25 0 1 1 2.5 0v8.738a3.318 3.318 0 0 1-3.314 3.314Z" />
+                          </svg>
+                        </span>
+                      </button>
+                    </div>
                     <time>{{ item.createdAt }}</time>
                   </header>
                   <p v-if="shouldShowTrajectoryDetail(item)">{{ item.detail }}</p>
@@ -1695,6 +1829,41 @@ onMounted(() => {
 
           <div v-else key="query-empty" class="proof-query__empty">
             <strong>想查什么？一键掌握</strong>
+            <section
+              v-if="isProofDomain && favoriteAlignedQueries.length"
+              class="proof-query-favorites"
+              aria-label="收藏的运动记录查询"
+            >
+              <header>
+                <span>收藏查询</span>
+                <small>保存在当前浏览器 · {{ favoriteAlignedQueries.length }} 条</small>
+              </header>
+              <div class="proof-query-favorites__list">
+                <div
+                  v-for="question in favoriteAlignedQueries"
+                  :key="question"
+                  class="proof-query-favorites__item"
+                >
+                  <button
+                    type="button"
+                    class="proof-query-favorites__query"
+                    :title="question"
+                    @click="startFavoriteQuery(question)"
+                  >
+                    <span>{{ question }}</span>
+                  </button>
+                  <button
+                    type="button"
+                    class="proof-query-favorites__remove"
+                    :aria-label="`删除收藏：${question}`"
+                    title="删除收藏"
+                    @click="removeFavoriteAlignedQuery(question)"
+                  >
+                    删除
+                  </button>
+                </div>
+              </div>
+            </section>
           </div>
         </Transition>
 
@@ -2033,7 +2202,7 @@ onMounted(() => {
                       class="proof-query-table__scroll"
                       tabindex="0"
                       :aria-label="`第 ${selectedHistoryRecord.sequence} 次${queryConfig.entityName}查询结果滚动区域`"
-                      @wheel="handleConstrainedVerticalWheel"
+                      @wheel.stop="handleConstrainedVerticalWheel"
                     >
                       <table :style="{ minWidth: `${Math.max(760, selectedHistoryColumns.length * 148)}px` }">
                         <thead>
@@ -2790,6 +2959,113 @@ onMounted(() => {
   transition: opacity 300ms ease;
 }
 
+.proof-query__result.has-live-interaction {
+  grid-template-rows: minmax(0, 1fr) auto;
+}
+
+.proof-query__result.has-clean-action .proof-query-history {
+  padding-top: 66px;
+}
+
+.proof-query-clean-action {
+  position: absolute;
+  z-index: 8;
+  top: 18px;
+  right: 20px;
+  width: 94px;
+  height: 38px;
+  padding: 0;
+  font: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  outline-offset: 4px;
+  touch-action: manipulation;
+  transition: filter 250ms ease;
+}
+
+.proof-query-clean-action__shadow,
+.proof-query-clean-action__edge {
+  position: absolute;
+  inset: 0;
+  border-radius: 11px;
+}
+
+.proof-query-clean-action__shadow {
+  background: rgb(0 0 0 / 25%);
+  transform: translateY(2px);
+  transition: transform 600ms cubic-bezier(0.3, 0.7, 0.4, 1);
+  will-change: transform;
+}
+
+.proof-query-clean-action__edge {
+  background: linear-gradient(
+    to left,
+    hsl(340deg 100% 16%) 0%,
+    hsl(340deg 100% 32%) 8%,
+    hsl(340deg 100% 32%) 92%,
+    hsl(340deg 100% 16%) 100%
+  );
+}
+
+.proof-query-clean-action__front {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 760;
+  letter-spacing: 0.07em;
+  background: hsl(345deg 100% 47%);
+  border-radius: 11px;
+  transform: translateY(-4px);
+  transition: transform 600ms cubic-bezier(0.3, 0.7, 0.4, 1);
+  place-items: center;
+  will-change: transform;
+}
+
+.proof-query-clean-action:hover {
+  filter: brightness(1.1);
+}
+
+.proof-query-clean-action:hover .proof-query-clean-action__front {
+  transform: translateY(-6px);
+  transition: transform 250ms cubic-bezier(0.3, 0.7, 0.4, 1.5);
+}
+
+.proof-query-clean-action:hover .proof-query-clean-action__shadow {
+  transform: translateY(4px);
+  transition: transform 250ms cubic-bezier(0.3, 0.7, 0.4, 1.5);
+}
+
+.proof-query-clean-action:active .proof-query-clean-action__front {
+  transform: translateY(-2px);
+  transition-duration: 34ms;
+}
+
+.proof-query-clean-action:active .proof-query-clean-action__shadow {
+  transform: translateY(1px);
+  transition-duration: 34ms;
+}
+
+.proof-query-clean-action:focus-visible {
+  outline: 3px solid rgb(231 59 101 / 26%);
+}
+
+.proof-query-clean-action-enter-active,
+.proof-query-clean-action-leave-active {
+  transition:
+    opacity 260ms ease,
+    transform 360ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.proof-query-clean-action-enter-from,
+.proof-query-clean-action-leave-to {
+  opacity: 0;
+  transform: translate3d(0, -8px, 0) scale(0.94);
+}
+
 .proof-query__result-actions {
   display: flex;
   align-items: center;
@@ -2825,7 +3101,7 @@ onMounted(() => {
 }
 
 .proof-query__result.has-live-interaction .proof-query-history {
-  padding-bottom: calc(min(220px, 32vh) + 36px);
+  padding-bottom: 12px;
 }
 
 .proof-query-live__connecting {
@@ -3111,19 +3387,96 @@ onMounted(() => {
   flex: 0 0 auto;
 }
 
-/* 当前查询的下载入口跟随最终完成节点，避免脱离本次结果的业务收口。 */
+/* 收藏和下载都跟随最终完成节点，让语句与结果的业务归属保持明确。 */
+.proof-query-live__completion-actions {
+  display: flex;
+  margin-left: auto;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+}
+
+.proof-query-live__favorite-action {
+  display: flex;
+  width: 104px;
+  height: 36px;
+  padding: 0 14px;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  color: #fcfcfc;
+  background: #1d1d1d;
+  border: 0;
+  border-radius: 12px;
+  box-shadow:
+    inset -2px -2px 5px rgb(255 255 255 / 20%),
+    inset 2px 2px 5px rgb(0 0 0 / 10%),
+    4px 4px 10px rgb(0 0 0 / 40%),
+    -2px -2px 8px rgb(255 255 255 / 10%);
+  cursor: pointer;
+  overflow: hidden;
+  transition:
+    background-color 260ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.proof-query-live__favorite-icon {
+  width: 21px;
+  height: 21px;
+  fill: #505050;
+  flex: 0 0 auto;
+  transition: fill 200ms ease-out;
+}
+
+.proof-query-live__favorite-action > span {
+  color: #fcfcfc;
+  font-size: 12px;
+  font-weight: 680;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+.proof-query-live__favorite-action:hover {
+  background: #242424;
+}
+
+.proof-query-live__favorite-action.is-favorite .proof-query-live__favorite-icon {
+  fill: #fc4e4e;
+  animation: proof-query-favorite-enlarge 200ms ease-out 1;
+}
+
+.proof-query-live__favorite-action:active {
+  box-shadow:
+    inset -2px -2px 5px rgb(255 255 255 / 12%),
+    inset 3px 3px 7px rgb(0 0 0 / 58%),
+    1px 1px 4px rgb(0 0 0 / 24%);
+  transform: translateY(2px) scale(0.98);
+}
+
+.proof-query-live__favorite-action:focus-visible {
+  outline: 3px solid rgb(103 91 176 / 24%);
+  outline-offset: 3px;
+}
+
+@keyframes proof-query-favorite-enlarge {
+  0% { transform: scale(0.5); }
+  72% { transform: scale(1.2); }
+  100% { transform: scale(1); }
+}
+
 .proof-query-table__download-action.proof-query-table__download-action--timeline {
   --download-expanded-icon-width: 124px;
   /* 当前任务的操作入口使用靛色底层，与工作中的蓝紫色调保持一致。 */
   --download-shadow: #5966ad;
-  margin-left: auto;
+  margin-left: 0;
   flex: 0 0 auto;
   width: 126px;
   height: 36px;
 }
 
-/* 下载与时间属于同一组右侧信息，避免标题较短时按钮漂在中间。 */
-.proof-query-live__trajectory article header .proof-query-table__download-action--timeline + time {
+/* 操作组与时间属于同一组右侧信息，避免标题较短时按钮漂在中间。 */
+.proof-query-live__trajectory article header .proof-query-live__completion-actions + time {
   margin-left: 0;
 }
 
@@ -3137,16 +3490,14 @@ onMounted(() => {
 }
 
 .proof-query-live__interaction {
-  position: absolute;
-  right: 14px;
-  bottom: 14px;
-  left: 14px;
+  position: relative;
   z-index: 5;
   display: grid;
-  max-height: min(220px, 32vh);
+  min-height: 0;
+  margin: 0 14px 14px;
   padding: 15px 17px;
   gap: 11px;
-  overflow-y: auto;
+  overflow: visible;
   background:
     radial-gradient(circle at 92% 12%, rgb(174 116 224 / 18%), transparent 34%),
     linear-gradient(130deg, rgb(57 54 80 / 96%), rgb(48 67 67 / 96%));
@@ -3179,10 +3530,23 @@ onMounted(() => {
 }
 
 .proof-query-live__interaction.is-field-review {
+  /* 字段说明与选项横向分区，减少长文案占用的纵向空间，同时让上方轨迹继续可见。 */
+  align-items: center;
+  align-content: center;
+  grid-template-columns: minmax(0, 1fr) auto;
   background:
     radial-gradient(circle at 92% 12%, rgb(144 150 255 / 25%), transparent 38%),
     linear-gradient(130deg, rgb(53 55 86 / 97%), rgb(44 69 77 / 97%));
   border-color: rgb(178 188 255 / 27%);
+}
+
+.proof-query-live__interaction.is-field-review .proof-query-live__options {
+  max-width: 300px;
+  align-content: center;
+}
+
+.proof-query-live__interaction.is-field-review .proof-query-live__interaction-error {
+  grid-column: 1 / -1;
 }
 
 .proof-query-live__field-review-tip {
@@ -3899,17 +4263,228 @@ onMounted(() => {
   display: grid;
   height: 100%;
   min-height: 0;
+  width: 100%;
+  padding: clamp(28px, 4vh, 42px) clamp(28px, 4vw, 48px);
+  align-content: start;
+  gap: 24px;
   color: #8b9791;
-  text-align: center;
-  place-content: center;
-  justify-items: center;
+  text-align: left;
+  justify-items: stretch;
 }
 
 .proof-query__empty strong {
   color: #53625b;
-  font-size: 18px;
-  font-weight: 760;
-  letter-spacing: 0.035em;
+  font-size: clamp(25px, 2.1vw, 32px);
+  font-weight: 790;
+  line-height: 1.2;
+  letter-spacing: 0.025em;
+}
+
+.proof-query-favorites {
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  padding: 17px 17px 12px;
+  gap: 12px;
+  text-align: left;
+  background:
+    radial-gradient(circle at 12% 4%, rgb(160 136 219 / 13%), transparent 38%),
+    linear-gradient(145deg, rgb(255 255 255 / 90%), rgb(238 243 242 / 82%));
+  border: 1px solid rgb(255 255 255 / 88%);
+  border-radius: 19px;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 92%),
+    0 17px 34px rgb(45 65 58 / 10%);
+}
+
+.proof-query-favorites > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.proof-query-favorites > header span {
+  color: #53605a;
+  font-size: 14px;
+  font-weight: 780;
+}
+
+.proof-query-favorites > header small {
+  color: #89958f;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.proof-query-favorites__list {
+  display: grid;
+  max-height: 248px;
+  padding: 11px 14px 15px;
+  gap: 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: rgb(238 240 239 / 68%);
+  border: 1px solid rgb(91 113 104 / 8%);
+  border-radius: 14px;
+  grid-template-columns: minmax(0, 1fr);
+  scrollbar-color: rgb(104 92 166 / 24%) transparent;
+  scrollbar-width: thin;
+}
+
+.proof-query-favorites__item {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  min-width: 0;
+  min-height: 58px;
+  align-items: center;
+  overflow: hidden;
+  color: #090909;
+  background: #e8e8e8;
+  border: 1px solid #e8e8e8;
+  border-radius: 9px;
+  box-shadow:
+    6px 6px 12px #c5c5c5,
+    -6px -6px 12px #fff;
+  grid-template-columns: minmax(0, 1fr) 68px;
+  isolation: isolate;
+  transition:
+    color 200ms ease-in,
+    border-color 200ms ease-in,
+    box-shadow 200ms ease-in;
+}
+
+.proof-query-favorites__item::before,
+.proof-query-favorites__item::after {
+  position: absolute;
+  z-index: -1;
+  left: 50%;
+  display: block;
+  content: '';
+  border-radius: 50%;
+  transform: translateX(-50%) scaleY(1) scaleX(1.25);
+  transition: all 500ms 100ms cubic-bezier(0.55, 0, 0.1, 1);
+}
+
+.proof-query-favorites__item::before {
+  top: 100%;
+  width: 140%;
+  height: 180%;
+  background: rgb(0 0 0 / 5%);
+}
+
+.proof-query-favorites__item::after {
+  top: 180%;
+  left: 55%;
+  width: 160%;
+  height: 190%;
+  background: #009087;
+  transform: translateX(-50%) scaleY(1) scaleX(1.45);
+}
+
+.proof-query-favorites__item:has(.proof-query-favorites__query:hover) {
+  border-color: #009087;
+}
+
+.proof-query-favorites__item:has(.proof-query-favorites__query:hover)::before {
+  top: -35%;
+  background: #009087;
+  transform: translateX(-50%) scaleY(1.3) scaleX(0.8);
+}
+
+.proof-query-favorites__item:has(.proof-query-favorites__query:hover)::after {
+  top: -45%;
+  background: #009087;
+  transform: translateX(-50%) scaleY(1.3) scaleX(0.8);
+}
+
+.proof-query-favorites__item:has(.proof-query-favorites__query:active) {
+  box-shadow:
+    inset 4px 4px 12px #c5c5c5,
+    inset -4px -4px 12px #fff;
+}
+
+.proof-query-favorites__remove,
+.proof-query-favorites__query {
+  min-width: 0;
+  font: inherit;
+  border: 0;
+  cursor: pointer;
+}
+
+.proof-query-favorites__remove {
+  position: relative;
+  z-index: 3;
+  justify-self: center;
+  width: 44px;
+  min-height: 28px;
+  padding: 4px 7px;
+  color: #a45763;
+  font-size: 11px;
+  font-weight: 720;
+  text-align: center;
+  background: rgb(185 76 91 / 8%);
+  border: 1px solid rgb(177 71 87 / 13%);
+  border-radius: 8px;
+  transition:
+    color 220ms ease,
+    background-color 220ms ease,
+    box-shadow 220ms ease,
+    transform 180ms ease;
+}
+
+.proof-query-favorites__remove:hover {
+  color: #fff;
+  background: #bc5363;
+  box-shadow: 0 5px 12px rgb(143 54 68 / 19%);
+  transform: translateY(-1px);
+}
+
+.proof-query-favorites__remove:active {
+  box-shadow: none;
+  transform: translateY(1px) scale(0.97);
+}
+
+.proof-query-favorites__query {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  width: 100%;
+  min-height: 56px;
+  padding: 12px 4px 12px 16px;
+  align-items: center;
+  color: #090909;
+  text-align: left;
+  background: transparent;
+  grid-template-columns: minmax(0, 1fr);
+  transition:
+    color 200ms ease-in,
+    transform 200ms ease-in;
+}
+
+.proof-query-favorites__query:hover {
+  color: #fff;
+}
+
+.proof-query-favorites__query:active {
+  color: #e7f7f5;
+  transform: scale(0.995);
+}
+
+.proof-query-favorites__remove:focus-visible,
+.proof-query-favorites__query:focus-visible {
+  outline: 3px solid rgb(104 88 177 / 20%);
+  outline-offset: 2px;
+}
+
+.proof-query-favorites__query span {
+  display: block;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 670;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @keyframes proof-query-search-scan {
@@ -5608,11 +6183,21 @@ onMounted(() => {
     padding-left: 2px;
   }
 
+  .proof-query__empty {
+    padding: 22px 14px;
+  }
+
   .proof-query-live__interaction {
-    right: 10px;
-    bottom: 10px;
-    left: 10px;
+    margin: 0 10px 10px;
     padding: 13px;
+  }
+
+  .proof-query-live__interaction.is-field-review {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .proof-query-live__interaction.is-field-review .proof-query-live__options {
+    max-width: none;
   }
 
   .proof-query-live__options,

@@ -150,6 +150,7 @@ description/
 - [`api/proof/final-review.md`](api/proof/final-review.md)：提交凭证终审决定，并处理默认评语、进度结果与异常状态。
 - [`api/project/project-list.md`](api/project/project-list.md)：获取按 ID 稳定排序的全部项目，并由各业务视图按状态筛选。
 - [`api/project/project-create.md`](api/project/project-create.md)：使用三段 JSON 字符串与处理后的 WebP 文件事务创建运动项目、全部等级规则和上传配置。
+- [`api/project/project-name-update.md`](api/project/project-name-update.md)：在项目详情中行内修改名称，并将完整服务端响应同步到工作台共享项目目录。
 - [`api/project/project-level-list.md`](api/project/project-level-list.md)：平台配置获取按奖励积分与主键升序排列的全部挑战等级。
 - [`api/project/project-level-create.md`](api/project/project-level-create.md)：二次确认后创建启用状态的挑战等级，并处理名称冲突。
 - [`api/project/project-level-reward-update.md`](api/project/project-level-reward-update.md)：二次确认后修改等级奖励积分，并由后端统一校验配置窗口。

@@ -10,6 +10,10 @@ import {
   updateProjectStatus,
 } from '../../api/project/projectStatusUpdateApi.js'
 import {
+  ProjectNameUpdateRequestError,
+  updateProjectName,
+} from '../../api/project/projectNameUpdateApi.js'
+import {
   createProject,
   ProjectCreateRequestError,
 } from '../../api/project/projectCreateApi.js'
@@ -333,6 +337,22 @@ const isRuleUpdateConfirmationActive = ref(false)
 const isRuleUpdating = ref(false)
 const isProjectStatusUpdating = ref(false)
 const projectStatusUpdateMessage = ref('')
+const projectNameInputRef = ref(null)
+const projectNameFieldRef = ref(null)
+const projectNameDisplayRef = ref(null)
+const projectNameCaretMirrorRef = ref(null)
+const projectNameFieldStyle = ref({})
+const projectNameCaretPrefix = ref('')
+const projectNameCaretOffset = ref(0)
+const isProjectNameCaretVisible = ref(false)
+const isProjectNameEditing = ref(false)
+const projectNameDraft = ref('')
+const isProjectNameInputShaking = ref(false)
+const isProjectNameUpdating = ref(false)
+const projectNameUpdateMessage = ref('')
+const projectMaintenanceMessage = computed(() => (
+  projectNameUpdateMessage.value || projectStatusUpdateMessage.value
+))
 const editingRuleLevel = computed(() => (
   selectedProject.value?.levels.find((level) => level.id === editingRuleLevelId.value) ?? null
 ))
@@ -352,8 +372,11 @@ let projectLevelCatalogGeneration = 0
 const projectRuleRequestControllers = new Map()
 let projectRuleUpdateRequestController = null
 let projectStatusUpdateRequestController = null
+let projectNameUpdateRequestController = null
 let projectCreateRequestController = null
 let ruleUpdateConfirmationTimerId = 0
+let projectNameShakeTimerId = 0
+let projectNameInputResizeObserver = null
 
 let closeRemoveTimerId = 0
 let focusTimerId = 0
@@ -581,6 +604,7 @@ async function openProjectDetail(project, event) {
   clearDetailTimers()
   hoveredProjectId.value = null
   projectStatusUpdateMessage.value = ''
+  resetProjectNameEditor()
   resetRuleEditor()
 
   const rootRect = configurationRef.value.getBoundingClientRect()
@@ -603,9 +627,12 @@ async function openProjectDetail(project, event) {
   }
 
   selectedProject.value = project
+  projectNameDraft.value = project.name
   // 规则只在管理员真正打开项目时加载，未打开项目不产生等级或规则请求。
   void loadProjectRules(project)
   await nextTick()
+  syncProjectNameFieldMetrics()
+  observeProjectNameInputSize()
 
   if (motionPreference?.matches) {
     detailLayerVisible.value = true
@@ -648,6 +675,157 @@ function resetRuleEditor() {
   ruleUpdateMessage.value = ''
 }
 
+function resetProjectNameEditor() {
+  window.clearTimeout(projectNameShakeTimerId)
+  projectNameShakeTimerId = 0
+  isProjectNameInputShaking.value = false
+  isProjectNameCaretVisible.value = false
+  projectNameCaretPrefix.value = ''
+  isProjectNameEditing.value = false
+  projectNameDraft.value = selectedProject.value?.name ?? ''
+  projectNameUpdateMessage.value = ''
+  void nextTick(syncProjectNameFieldMetrics)
+}
+
+function syncProjectNameFieldMetrics() {
+  if (!projectNameDisplayRef.value || !projectNameFieldRef.value) return
+
+  // scrollWidth 使用变换前的布局尺寸，避免卡片放大翻转阶段把名称宽度一并缩小。
+  const titleWidth = Math.ceil(projectNameDisplayRef.value.scrollWidth)
+  const responsiveEditorWidth = window.innerWidth <= 720
+    ? window.innerWidth - 226
+    : window.innerWidth * 0.2
+  const editorWidth = Math.min(250, Math.max(138, Math.round(responsiveEditorWidth)))
+  projectNameFieldStyle.value = {
+    '--project-name-collapsed-width': `${Math.min(editorWidth, 218, Math.max(64, titleWidth + 28))}px`,
+    '--project-name-expanded-width': `${editorWidth}px`,
+  }
+}
+
+async function syncProjectNameCaret() {
+  const input = projectNameInputRef.value
+  if (!input || !isProjectNameEditing.value || document.activeElement !== input) {
+    isProjectNameCaretVisible.value = false
+    return
+  }
+
+  const selectionStart = input.selectionStart ?? projectNameDraft.value.length
+  const selectionEnd = input.selectionEnd ?? selectionStart
+  if (selectionStart !== selectionEnd) {
+    isProjectNameCaretVisible.value = false
+    return
+  }
+
+  projectNameCaretPrefix.value = projectNameDraft.value.slice(0, selectionStart)
+  await nextTick()
+  const prefixWidth = projectNameCaretMirrorRef.value?.getBoundingClientRect().width ?? 0
+  const contentWidth = Math.max(0, input.clientWidth - 20)
+  projectNameCaretOffset.value = Math.min(
+    contentWidth,
+    Math.max(0, prefixWidth - input.scrollLeft),
+  )
+  isProjectNameCaretVisible.value = true
+}
+
+function observeProjectNameInputSize() {
+  projectNameInputResizeObserver?.disconnect()
+  if (!projectNameInputRef.value || typeof ResizeObserver === 'undefined') return
+  // 输入框伸缩期间逐帧校准自定义光标，避免框体变宽而光标滞留在旧位置。
+  projectNameInputResizeObserver = new ResizeObserver(() => {
+    void syncProjectNameCaret()
+  })
+  projectNameInputResizeObserver.observe(projectNameInputRef.value)
+}
+
+async function startProjectNameEditing() {
+  if (
+    !selectedProject.value
+    || editingRuleLevelId.value !== null
+    || isProjectNameUpdating.value
+    || isProjectStatusUpdating.value
+  ) return
+
+  projectNameDraft.value = selectedProject.value.name
+  projectNameUpdateMessage.value = ''
+  projectStatusUpdateMessage.value = ''
+  syncProjectNameFieldMetrics()
+  isProjectNameEditing.value = true
+  await nextTick()
+  projectNameInputRef.value?.focus()
+  const caretIndex = projectNameDraft.value.length
+  projectNameInputRef.value?.setSelectionRange(caretIndex, caretIndex)
+  await syncProjectNameCaret()
+}
+
+function cancelProjectNameEditing() {
+  if (isProjectNameUpdating.value) return
+  resetProjectNameEditor()
+}
+
+function handleProjectNameInput() {
+  projectNameUpdateMessage.value = ''
+  void nextTick(syncProjectNameCaret)
+}
+
+async function handleProjectNameKeydown(event) {
+  if (!['Backspace', 'Delete'].includes(event.key) || projectNameDraft.value.length) return
+
+  // 空输入仍继续删除时才用抖动提示边界，正常输入、聚焦和首次清空均保持稳定。
+  window.clearTimeout(projectNameShakeTimerId)
+  isProjectNameInputShaking.value = false
+  await nextTick()
+  isProjectNameInputShaking.value = true
+  projectNameShakeTimerId = window.setTimeout(() => {
+    isProjectNameInputShaking.value = false
+    projectNameShakeTimerId = 0
+  }, 500)
+}
+
+async function submitProjectNameUpdate() {
+  if (!selectedProject.value || isProjectNameUpdating.value) return
+
+  const project = selectedProject.value
+  const normalizedName = projectNameDraft.value.trim()
+  const nameLength = Array.from(normalizedName).length
+  if (!nameLength || nameLength > 64) {
+    projectNameUpdateMessage.value = '项目名称需为 1～64 个字符'
+    return
+  }
+  if (normalizedName === project.name) {
+    resetProjectNameEditor()
+    return
+  }
+  if (sportProjects.value.some((item) => item.id !== project.id && item.name === normalizedName)) {
+    projectNameUpdateMessage.value = '运动项目名称已存在'
+    return
+  }
+
+  const requestController = new AbortController()
+  projectNameUpdateRequestController = requestController
+  isProjectNameUpdating.value = true
+  projectNameUpdateMessage.value = ''
+  try {
+    const updatedProject = await updateProjectName(project.id, normalizedName, {
+      signal: requestController.signal,
+    })
+    if (projectNameUpdateRequestController !== requestController) return
+
+    Object.assign(project, updatedProject)
+    emit('project-updated', updatedProject)
+    resetProjectNameEditor()
+  } catch (error) {
+    if (error?.name === 'AbortError') return
+    projectNameUpdateMessage.value = error instanceof ProjectNameUpdateRequestError
+      ? error.message
+      : '运动项目名称修改失败，请稍后重试'
+  } finally {
+    if (projectNameUpdateRequestController === requestController) {
+      projectNameUpdateRequestController = null
+      isProjectNameUpdating.value = false
+    }
+  }
+}
+
 function serializeRuleDraftValue(value) {
   // null 没有可供推断的具体类型，以文本框承接首次配置；留空仍保存为 null。
   if (value === null) return { type: 'nullable-string', text: '' }
@@ -674,7 +852,13 @@ function parseRuleDraftMetric(metric) {
 }
 
 async function startRuleEditing(level) {
-  if (!selectedProject.value || level.loading || level.error || isRuleUpdating.value) return
+  if (
+    !selectedProject.value
+    || level.loading
+    || level.error
+    || isRuleUpdating.value
+    || isProjectNameEditing.value
+  ) return
   editingRuleLevelId.value = level.id
   ruleDraft.value = {
     subDesc: level.subDesc ?? '',
@@ -766,10 +950,16 @@ async function submitRuleUpdate(level) {
 }
 
 async function toggleProjectVisibility() {
-  if (!selectedProject.value || isProjectStatusUpdating.value) return
+  if (
+    !selectedProject.value
+    || isProjectStatusUpdating.value
+    || isProjectNameEditing.value
+    || isProjectNameUpdating.value
+  ) return
   const project = selectedProject.value
   const nextStatus = project.status === 0 ? 1 : 0
   projectStatusUpdateMessage.value = ''
+  projectNameUpdateMessage.value = ''
 
   const requestController = new AbortController()
   projectStatusUpdateRequestController = requestController
@@ -887,10 +1077,18 @@ async function createSportProject(payload) {
 
 function closeProjectDetail() {
   // 写请求返回前保持当前编辑上下文，避免服务端成功后找不到待更新的等级卡片。
-  if (!selectedProject.value || isRuleUpdating.value || isProjectStatusUpdating.value) return
+  if (
+    !selectedProject.value
+    || isRuleUpdating.value
+    || isProjectStatusUpdating.value
+    || isProjectNameUpdating.value
+  ) return
 
   clearDetailTimers()
+  projectNameInputResizeObserver?.disconnect()
+  projectNameInputResizeObserver = null
   resetRuleEditor()
+  resetProjectNameEditor()
 
   if (motionPreference?.matches) {
     selectedProject.value = null
@@ -913,6 +1111,10 @@ function handleGlobalKeydown(event) {
   if (event.key !== 'Escape') return
 
   if (selectedProject.value) {
+    if (isProjectNameEditing.value) {
+      cancelProjectNameEditing()
+      return
+    }
     if (editingRuleLevelId.value !== null) {
       cancelRuleEditing()
       return
@@ -928,6 +1130,7 @@ function handleGlobalKeydown(event) {
 onMounted(() => {
   motionPreference = window.matchMedia('(prefers-reduced-motion: reduce)')
   window.addEventListener('keydown', handleGlobalKeydown)
+  window.addEventListener('resize', syncProjectNameFieldMetrics)
 })
 
 onActivated(() => {
@@ -940,14 +1143,18 @@ onActivated(() => {
 onBeforeUnmount(() => {
   clearDetailTimers()
   clearRuleUpdateConfirmation()
+  window.clearTimeout(projectNameShakeTimerId)
+  projectNameInputResizeObserver?.disconnect()
   projectLevelListRequestController?.abort()
   projectCreateRequestController?.abort()
   projectRuleUpdateRequestController?.abort()
   projectStatusUpdateRequestController?.abort()
+  projectNameUpdateRequestController?.abort()
   projectRuleRequestControllers.forEach((controller) => controller.abort())
   projectRuleRequestControllers.clear()
   localProjectRuleCatalog?.clear()
   window.removeEventListener('keydown', handleGlobalKeydown)
+  window.removeEventListener('resize', syncProjectNameFieldMetrics)
 })
 </script>
 
@@ -1102,12 +1309,13 @@ onBeforeUnmount(() => {
           >
             <header
               class="sport-project-detail-card__header"
-              :inert="isRuleUpdating || isProjectStatusUpdating"
+              :inert="isRuleUpdating || isProjectStatusUpdating || isProjectNameUpdating"
             >
               <button
                 ref="detailBackButtonRef"
                 type="button"
                 aria-label="返回全部运动项目"
+                :disabled="isProjectNameUpdating"
                 @click="closeProjectDetail"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -1124,8 +1332,104 @@ onBeforeUnmount(() => {
                   </svg>
                   <strong v-else>{{ selectedProject.name.slice(0, 1) }}</strong>
                 </span>
-                <div>
-                  <h3>{{ selectedProject.name }}</h3>
+                <div
+                  class="sport-project-detail-card__title-copy"
+                  :class="{ 'is-name-editing': isProjectNameEditing }"
+                >
+                  <div class="sport-project-detail-card__name-row">
+                    <div
+                      ref="projectNameFieldRef"
+                      class="sport-project-detail-card__name-input-container"
+                      :class="{
+                        'is-editing': isProjectNameEditing,
+                        'is-shaking': isProjectNameInputShaking,
+                      }"
+                      :style="projectNameFieldStyle"
+                    >
+                      <input
+                        ref="projectNameInputRef"
+                        v-model="projectNameDraft"
+                        class="sport-project-detail-card__name-input"
+                        type="text"
+                        maxlength="64"
+                        autocomplete="off"
+                        placeholder="输入项目名称"
+                        aria-label="运动项目名称"
+                        :readonly="!isProjectNameEditing"
+                        :tabindex="isProjectNameEditing ? 0 : -1"
+                        :disabled="isProjectNameUpdating"
+                        @focus="syncProjectNameCaret"
+                        @blur="isProjectNameCaretVisible = false"
+                        @click="syncProjectNameCaret"
+                        @input="handleProjectNameInput"
+                        @keydown="handleProjectNameKeydown"
+                        @keydown.enter.prevent="submitProjectNameUpdate"
+                        @keyup="syncProjectNameCaret"
+                        @select="syncProjectNameCaret"
+                        @scroll="syncProjectNameCaret"
+                      />
+                      <span
+                        ref="projectNameCaretMirrorRef"
+                        class="sport-project-detail-card__name-caret-mirror"
+                        aria-hidden="true"
+                      >{{ projectNameCaretPrefix }}</span>
+                      <i
+                        v-show="isProjectNameCaretVisible"
+                        class="sport-project-detail-card__name-caret"
+                        :style="{ '--project-name-caret-offset': `${projectNameCaretOffset}px` }"
+                        aria-hidden="true"
+                      >|</i>
+                      <span
+                        ref="projectNameDisplayRef"
+                        class="sport-project-detail-card__name-measure"
+                        aria-hidden="true"
+                      >{{ selectedProject.name }}</span>
+                    </div>
+
+                    <div
+                      class="sport-project-detail-card__name-controls"
+                      :class="{ 'is-editing': isProjectNameEditing }"
+                    >
+                      <button
+                        v-if="!isProjectNameEditing"
+                        type="button"
+                        class="is-edit"
+                        aria-label="修改运动项目名称"
+                        @click="startProjectNameEditing"
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="m4 20 4.2-1 10.6-10.6a2 2 0 0 0-2.8-2.8L5.4 16.2 4 20Z" />
+                          <path d="m14.8 6.8 2.8 2.8" />
+                        </svg>
+                        <span>修改</span>
+                      </button>
+                      <TransitionGroup
+                        v-else
+                        name="project-name-control"
+                        tag="div"
+                        class="sport-project-detail-card__name-action-group"
+                      >
+                        <button
+                          key="confirm-name"
+                          type="button"
+                          class="is-confirm"
+                          :disabled="isProjectNameUpdating"
+                          @click="submitProjectNameUpdate"
+                        >
+                          {{ isProjectNameUpdating ? '保存中' : '确定' }}
+                        </button>
+                        <button
+                          key="cancel-name"
+                          type="button"
+                          class="is-cancel"
+                          :disabled="isProjectNameUpdating"
+                          @click="cancelProjectNameEditing"
+                        >
+                          取消
+                        </button>
+                      </TransitionGroup>
+                    </div>
+                  </div>
                   <span>各挑战等级要求</span>
                 </div>
               </div>
@@ -1135,7 +1439,7 @@ onBeforeUnmount(() => {
                   <button
                     type="button"
                     :class="{ 'is-restore': selectedProject.status === 0 }"
-                    :disabled="isProjectStatusUpdating"
+                    :disabled="isProjectStatusUpdating || isProjectNameEditing"
                     @click="toggleProjectVisibility"
                   >
                     <svg v-if="selectedProject.status === 0" viewBox="0 0 24 24" aria-hidden="true">
@@ -1157,16 +1461,16 @@ onBeforeUnmount(() => {
             </header>
 
             <p
-              v-if="projectStatusUpdateMessage"
+              v-if="projectMaintenanceMessage"
               class="sport-project-detail-card__status-error"
               role="alert"
             >
-              {{ projectStatusUpdateMessage }}
+              {{ projectMaintenanceMessage }}
             </p>
 
             <div
               class="sport-project-detail-card__rules"
-              :inert="editingRuleLevelId !== null"
+              :inert="editingRuleLevelId !== null || isProjectNameEditing"
             >
               <div
                 v-if="selectedProject.rulesLoading && !selectedProject.levels.length"
@@ -1956,17 +2260,267 @@ onBeforeUnmount(() => {
 }
 
 .sport-project-detail-card__title h3 {
-  margin: 0 0 3px;
+  min-width: 0;
+  margin: 0;
   color: #303d36;
   font-size: clamp(19px, 2vw, 25px);
   font-weight: 790;
   letter-spacing: -0.025em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.sport-project-detail-card__title div > span {
+.sport-project-detail-card__title-copy {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.sport-project-detail-card__title-copy > span {
+  display: block;
+  margin-top: 10px;
   color: #7b8780;
   font-size: 12px;
   font-weight: 650;
+}
+
+.sport-project-detail-card__name-row {
+  display: flex;
+  min-height: 48px;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.sport-project-detail-card__name-input-container {
+  position: relative;
+  width: var(--project-name-collapsed-width, 138px);
+  min-width: 0;
+  max-width: 250px;
+  transition: width 560ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sport-project-detail-card__name-input-container.is-editing {
+  width: var(--project-name-expanded-width, clamp(138px, 20vw, 250px));
+}
+
+.sport-project-detail-card__name-measure {
+  position: absolute;
+  visibility: hidden;
+  width: max-content;
+  font-family: 'Courier New', monospace;
+  font-size: clamp(15px, 1.6vw, 18px);
+  font-weight: 800;
+  letter-spacing: 1px;
+  pointer-events: none;
+}
+
+.sport-project-detail-card__name-caret-mirror {
+  position: absolute;
+  visibility: hidden;
+  width: max-content;
+  font-family: 'Courier New', monospace;
+  font-size: clamp(15px, 1.6vw, 18px);
+  font-weight: 800;
+  letter-spacing: 1px;
+  white-space: pre;
+  pointer-events: none;
+}
+
+.sport-project-detail-card__name-caret {
+  position: absolute;
+  z-index: 2;
+  top: 50%;
+  left: 13px;
+  color: #fff;
+  font-family: 'Courier New', monospace;
+  font-size: clamp(15px, 1.6vw, 18px);
+  font-style: normal;
+  font-weight: 800;
+  line-height: 1;
+  pointer-events: none;
+  transform: translate(var(--project-name-caret-offset, 0), -50%);
+  animation: project-name-caret-blink 700ms step-end infinite;
+}
+
+.sport-project-detail-card__name-input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 42px;
+  padding: 7px 10px;
+  color: #050505;
+  font-family: 'Courier New', monospace;
+  font-size: clamp(15px, 1.6vw, 18px);
+  font-weight: 800;
+  letter-spacing: 1px;
+  background: #fff;
+  border: 3px solid #050505;
+  border-radius: 0;
+  box-shadow: 6px 6px 0 #050505;
+  caret-color: transparent;
+  outline: none;
+  transition:
+    color 300ms ease,
+    background-color 300ms ease,
+    border-color 300ms ease,
+    box-shadow 300ms ease,
+    transform 300ms ease;
+}
+
+.sport-project-detail-card__name-input[readonly] {
+  caret-color: transparent;
+  cursor: default;
+  pointer-events: none;
+  user-select: none;
+}
+
+.sport-project-detail-card__name-input::placeholder {
+  color: #7c7c7c;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+.sport-project-detail-card__name-input-container.is-editing
+  .sport-project-detail-card__name-input:hover:not(:focus) {
+  box-shadow: 9px 9px 0 #050505;
+  transform: translate(-3px, -3px);
+}
+
+.sport-project-detail-card__name-input:focus {
+  color: #fff;
+  background: #050505;
+  border-color: #d6d9dd;
+  box-shadow: 6px 6px 0 #050505;
+  caret-color: transparent;
+}
+
+.sport-project-detail-card__name-input:focus::placeholder {
+  color: #fff;
+}
+
+.sport-project-detail-card__name-input-container.is-shaking {
+  animation: project-name-input-shake 500ms ease-in-out;
+}
+
+@keyframes project-name-caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes project-name-input-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+
+  25%,
+  75% {
+    transform: translateX(-4px) rotate(-1.5deg);
+  }
+
+  50% {
+    transform: translateX(4px) rotate(1.5deg);
+  }
+}
+
+.sport-project-detail-card__name-controls {
+  display: flex;
+  width: 61px;
+  height: 48px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  align-items: center;
+  transform: translateY(3px);
+  transition:
+    width 520ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 320ms ease;
+}
+
+.sport-project-detail-card__name-controls.is-editing {
+  width: 112px;
+}
+
+.sport-project-detail-card__name-controls button {
+  display: inline-flex;
+  height: 29px;
+  padding: 0 9px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: #466e91;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 740;
+  white-space: nowrap;
+  background: rgb(72 127 173 / 8%);
+  border: 1px solid rgb(69 120 162 / 13%);
+  border-radius: 9px;
+  cursor: pointer;
+  transition:
+    color 260ms ease,
+    background-color 260ms ease,
+    box-shadow 320ms ease,
+    transform 220ms ease;
+}
+
+.sport-project-detail-card__name-controls button > svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.sport-project-detail-card__name-controls button.is-confirm {
+  color: #f7fbf9;
+  background: linear-gradient(145deg, #498d79, #326956);
+  border-color: rgb(40 101 82 / 20%);
+  box-shadow: 0 6px 13px rgb(47 102 84 / 16%);
+}
+
+.sport-project-detail-card__name-controls button.is-cancel {
+  color: #68756f;
+  background: rgb(239 243 241 / 94%);
+  border-color: rgb(70 94 82 / 10%);
+}
+
+.sport-project-detail-card__name-controls button:active {
+  box-shadow: none;
+  transform: translateY(1px) scale(0.96);
+}
+
+.sport-project-detail-card__name-controls button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--project-primary) 30%, transparent);
+  outline-offset: 2px;
+}
+
+.sport-project-detail-card__name-controls button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.sport-project-detail-card__name-action-group {
+  display: grid;
+  width: 112px;
+  height: 29px;
+  gap: 5px;
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.project-name-control-enter-active,
+.project-name-control-leave-active {
+  transition:
+    opacity 360ms ease,
+    transform 480ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.project-name-control-enter-from,
+.project-name-control-leave-to {
+  opacity: 0;
+  transform: translateX(-10px) scale(0.9);
 }
 
 .sport-project-detail-card__count {
@@ -2907,6 +3461,23 @@ onBeforeUnmount(() => {
   .sport-project-detail-card__header > button svg,
   .sport-project-detail-card__actions button {
     transition: none;
+  }
+
+  .sport-project-detail-card__name-controls,
+  .sport-project-detail-card__name-controls button,
+  .sport-project-detail-card__name-input-container,
+  .sport-project-detail-card__name-input,
+  .project-name-control-enter-active,
+  .project-name-control-leave-active {
+    transition: none;
+  }
+
+  .sport-project-detail-card__name-input {
+    animation: none;
+  }
+
+  .sport-project-detail-card__name-caret {
+    animation: none;
   }
 }
 </style>

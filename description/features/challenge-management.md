@@ -57,13 +57,14 @@
 
 项目卡片背面提供以下管理动作：
 
+- **修改名称**：项目名称右侧进入行内编辑态，原修改按钮平滑扩展为确定和取消；成功后以服务端完整响应同步工作台共享项目目录。
 - **修订**：在项目详情上方打开独立修订卡，不改变原等级网格布局；左右配置面板保持等高，指标过多时右侧指标列表独立滚动。可修改 `sub_desc`、`rule_note` 和既有 `rule_content[].value`。指标标签、顺序和值类型不可变；编辑器根据原值类型自动选择控件，不提供类型选择。原值为 `null` 时允许首次填写文本值，留空仍提交 `null`。
 - **隐藏项目**：调用真实状态接口将项目调整为停用，但继续在管理端以弱化卡片展示；成功后同步数据看板可见项目和赛季容量。
 - **恢复显示**：调用真实状态接口将已隐藏项目重新调整为启用。
 项目管理不提供删除入口。已被历史数据引用或暂时不再开放的项目统一使用隐藏状态退出普通可选项目口径。
 
 > [!NOTE]
-项目创建已经接入真实 multipart 接口，三段 JSON 与 WebP 文件由后端在同一事务写入并上传图标；创建按钮使用 3 秒二次确认。单等级规则配置与项目状态也已接入真实 `PATCH` 接口。
+项目创建已经接入真实 multipart 接口，三段 JSON 与 WebP 文件由后端在同一事务写入并上传图标；创建按钮使用 3 秒二次确认。项目名称、单等级规则配置与项目状态也已接入真实 `PATCH` 接口。
 
 ---
 
@@ -84,7 +85,7 @@
 - 挑战等级列表已接入真实查询接口。
 - 挑战等级新增已接入真实创建接口，名称冲突由服务端唯一键最终约束。
 - 奖励积分编辑已经接入真实修改接口，并由后端统一执行激活赛季配置窗口校验。
-- 运动项目已接入项目创建、单项目单等级规则修改及项目可见状态修改；不提供项目删除入口，已有项目资料修改、指标结构调整及独立上传配置维护仍待后续设计。
+- 运动项目已接入项目创建、名称修改、单项目单等级规则修改及项目可见状态修改；不提供项目删除入口，项目说明与图标修改、指标结构调整及独立上传配置维护仍待后续设计。
 
 ## 关联组件与文档
 
@@ -100,6 +101,7 @@
 - 积分修改接口：`description/api/project/project-level-reward-update.md`
 - 单等级规则修改接口：`description/api/project/project-rule-update.md`
 - 项目创建接口：`description/api/project/project-create.md`
+- 项目名称修改接口：`description/api/project/project-name-update.md`
 - 项目组件说明：`description/components/configuration/SportProjectConfiguration.md`
 - 项目星河说明：`description/components/configuration/PixiProjectGalaxy.md`
 - 平台配置说明：`description/features/platform-configuration.md`

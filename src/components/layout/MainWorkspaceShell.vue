@@ -698,7 +698,7 @@ async function loadProjectCatalog() {
 }
 
 async function handleProjectUpdated(updatedProject) {
-  // 状态修改会同时影响数据看板可见项目和新赛季容量，统一更新工作台共享目录。
+  // 名称与状态都会被看板、审核和配置页复用，修改成功后统一更新工作台共享目录。
   const projectExists = allProjects.value.some((project) => project.id === updatedProject.id)
   allProjects.value = projectExists
     ? allProjects.value.map((project) => (

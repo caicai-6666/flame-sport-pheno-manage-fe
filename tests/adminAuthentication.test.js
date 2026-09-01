@@ -17,6 +17,7 @@ let projectLevelRewardUpdateApi
 let projectListApi
 let projectCreateApi
 let projectStatusUpdateApi
+let projectNameUpdateApi
 let projectCatalog
 let projectParticipantsApi
 let projectParticipantsLoader
@@ -101,6 +102,9 @@ before(async () => {
   projectCreateApi = await viteServer.ssrLoadModule('/src/api/project/projectCreateApi.js')
   projectStatusUpdateApi = await viteServer.ssrLoadModule(
     '/src/api/project/projectStatusUpdateApi.js',
+  )
+  projectNameUpdateApi = await viteServer.ssrLoadModule(
+    '/src/api/project/projectNameUpdateApi.js',
   )
   projectCatalog = await viteServer.ssrLoadModule('/src/services/projectCatalog.js')
   projectParticipantsApi = await viteServer.ssrLoadModule(
@@ -1273,6 +1277,73 @@ test('项目状态接口保留配置窗口冲突并拒绝非严格状态', async
       error.name === 'ProjectStatusUpdateRequestError'
       && error.status === 409
       && error.message === '当前激活赛季的配置修改窗口已关闭'
+    ),
+  )
+})
+
+test('项目名称接口裁剪输入并采用完整服务端响应', async () => {
+  adminSession.saveAdminSession({
+    accessToken: 'project-name-token',
+    tokenType: 'bearer',
+    expiresIn: 28800,
+  })
+  let capturedRequest
+  globalThis.fetch = async (url, options) => {
+    capturedRequest = { url, options }
+    return new Response(JSON.stringify({
+      project_id: 2,
+      project_name: '力量训练',
+      description: '记录每日训练',
+      icon_url: '/fitness.webp',
+      status: 1,
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
+  const project = await projectNameUpdateApi.updateProjectName(2, '  力量训练  ')
+
+  assert.equal(capturedRequest.url, '/dev/flame/admin/api/project/2/name')
+  assert.equal(capturedRequest.options.method, 'PATCH')
+  assert.equal(
+    capturedRequest.options.headers.get('Authorization'),
+    'Bearer project-name-token',
+  )
+  assert.deepEqual(JSON.parse(capturedRequest.options.body), { name: '力量训练' })
+  assert.deepEqual(project, {
+    id: 2,
+    name: '力量训练',
+    description: '记录每日训练',
+    iconUrl: '/fitness.webp',
+    status: 1,
+  })
+})
+
+test('项目名称接口拒绝空名称并保留服务端名称冲突提示', async () => {
+  await assert.rejects(
+    () => projectNameUpdateApi.updateProjectName(2, '   '),
+    (error) => error.name === 'ProjectNameUpdateRequestError' && error.status === 422,
+  )
+
+  adminSession.saveAdminSession({
+    accessToken: 'project-name-conflict-token',
+    tokenType: 'bearer',
+    expiresIn: 28800,
+  })
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    detail: '运动项目名称已存在',
+  }), {
+    status: 409,
+    headers: { 'Content-Type': 'application/json' },
+  })
+
+  await assert.rejects(
+    () => projectNameUpdateApi.updateProjectName(2, '跑步'),
+    (error) => (
+      error.name === 'ProjectNameUpdateRequestError'
+      && error.status === 409
+      && error.message === '运动项目名称已存在'
     ),
   )
 })
